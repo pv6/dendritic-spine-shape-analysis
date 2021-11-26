@@ -2,6 +2,13 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import numpy as np
 from ipywidgets import interact, Layout
+import pyvista
+from CGAL.CGAL_Polyhedron_3 import Polyhedron_3
+
+
+def show_3d_mesh(filename: str) -> None:
+    mesh = pyvista.UnstructuredGrid(filename)
+    mesh.plot()
 
 
 def _show_image(ax, image, cmap="gray", title=None):
