@@ -8,8 +8,9 @@ from scipy.ndimage import binary_erosion
 from CGAL.CGAL_Kernel import Point_3
 from CGAL.CGAL_Kernel import Vector_3
 from CGAL.CGAL_Point_set_3 import Point_set_3
-from CGAL.CGAL_Polyhedron_3 import Polyhedron_3
-from CGAL.CGAL_Polygon_mesh_processing import Polylines
+from CGAL.CGAL_Polyhedron_3 import Polyhedron_3, Polyhedron_3_Halfedge_handle, \
+    Polyhedron_3_Vertex_handle, Polyhedron_3_Facet_handle, Polyhedron_3_Halfedge_around_facet_circulator
+from CGAL.CGAL_Polygon_mesh_processing import Polylines, connected_components
 import open3d as o3d
 from skimage.filters import threshold_local
 
@@ -264,20 +265,54 @@ def segmentation_by_distance(polyhedron: Polyhedron_3,
     return output_segmentation
 
 
-def color_mesh(segmentation: Segmentation, mesh_filename: str,
-               colored_mesh_filename: str) -> None:
-    # load mesh
-    mesh = o3d.io.read_triangle_mesh(mesh_filename)
+def get_spine_meshes(in_mesh: Polyhedron_3, segmentation) -> List[Polyhedron_3]:
+    # copy mesh
+    mesh: Polyhedron_3 = in_mesh.deepcopy()
 
-    # apply colors
-    red = [1, 0, 0]
-    green = [0, 1, 0]
+    # erase dendrite facets
+    for facet in mesh.facets():
+        circulator: Polyhedron_3_Halfedge_around_facet_circulator = facet.facet_begin()
+        begin = facet.facet_begin()
+        while circulator.hasNext():
+            halfedge: Polyhedron_3_Halfedge_handle = circulator.next()
+            v: Polyhedron_3_Vertex_handle = halfedge.vertex()
 
-    colors = []
-    points = np.asarray(mesh.vertices)
-    for point in points:
-        colors.append(red if segmentation[hash_point(list_2_point(point))] else green)
-    mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
+            if not segmentation[hash_point(v.point())]:
+                mesh.erase_facet(facet.halfedge())
+                break
+            # check for end of loop
+            if circulator == begin:
+                break
 
-    # save file
-    o3d.io.write_triangle_mesh(colored_mesh_filename, mesh, write_vertex_colors=True)
+    components = connected_components(mesh)
+    num_of_components = max(components) + 1
+
+    output = []
+    for i in range(num_of_components):
+        spine_mesh: Polyhedron_3 = mesh.deepcopy()
+
+        # remove other spines from mesh
+        for j, facet in enumerate(spine_mesh.facets()):
+            if components[j] != i:
+                spine_mesh.erase_facet(facet.halfedge())
+
+        # remove small meshes
+        if spine_mesh.size_of_facets() <= 10:
+            continue
+
+        # fill holes
+        for h in spine_mesh.halfedges():
+            a = Polyhedron_3_Halfedge_handle()
+            if h.is_border():
+                spine_mesh.fill_hole(h)
+
+        # triangulate non-triangle facets via center vertex
+        for facet in spine_mesh.facets():
+            if not facet.is_triangle():
+                spine_mesh.create_center_vertex(facet.halfedge())
+
+        output.append(spine_mesh)
+
+    print(f"Detected {len(output)} spines")
+
+    return output
