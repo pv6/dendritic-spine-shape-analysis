@@ -13,6 +13,7 @@ from CGAL.CGAL_Polyhedron_3 import Polyhedron_3, Polyhedron_3_Halfedge_handle, \
 from CGAL.CGAL_Polygon_mesh_processing import Polylines, connected_components
 import open3d as o3d
 from skimage.filters import threshold_local
+import json
 
 
 Correspondence = Dict[str, Point_3]
@@ -316,3 +317,20 @@ def get_spine_meshes(in_mesh: Polyhedron_3, segmentation) -> List[Polyhedron_3]:
     print(f"Detected {len(output)} spines")
 
     return output
+
+
+def save_segmentation(segmentation: Segmentation, filename: str) -> None:
+    # from https://stackoverflow.com/a/67572570
+    class CustomJSONizer(json.JSONEncoder):
+        def default(self, obj):
+            return super().encode(bool(obj)) \
+                if isinstance(obj, np.bool_) \
+                else super().default(obj)
+
+    with open(filename, "w") as file:
+        json.dump(segmentation, file, cls=CustomJSONizer)
+
+
+def load_segmentation(filename: str) -> Segmentation:
+    with open(filename, 'r') as file:
+        return json.load(file)

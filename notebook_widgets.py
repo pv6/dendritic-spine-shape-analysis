@@ -2,11 +2,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from ipywidgets import widgets
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from spine_segmentation import point_2_list, list_2_point, hash_point, \
-    Segmentation, segmentation_by_distance
+    Segmentation, segmentation_by_distance, load_segmentation
 import meshplot as mp
-import random
+from IPython.display import display
+from spine_metrics import SpineMetric
 
 
 RED = (1, 0, 0)
@@ -98,12 +99,68 @@ def show_3d_image(data: np.ndarray, cmap="gray"):
     return display_slice
 
 
-def show_spines(spine_meshes: List[Polyhedron_3]):
-    @widgets.interact(index=(0, len(spine_meshes) - 1), correct_spine=True)
-    def show_spine(index: int = 0, correct_spine: bool = True):
+def make_viewer(v: np.ndarray, f: np.ndarray, c=None) -> mp.Viewer:
+    view = mp.Viewer({})
+    view.add_mesh(v, f, c)
+    return view
+
+
+def _get_spine_preview_widget(spine_v_f: Tuple, dendrite_v_f: Tuple,
+                              metrics: List[SpineMetric]) -> widgets.VBox:
+    view = make_viewer(*spine_v_f)
+    # view.add_mesh(*dendrite_v_f, shading={"wireframe": True})
+    # (v, f) = dendrite_v_f
+    # view.add_lines(v[f[:, 0]], v[f[:, 1]], shading={"line_color": "gray"})
+
+    metrics_box = widgets.VBox([widgets.HBox([widgets.Label(metric.name),
+                                              metric.show()])
+                                for metric in metrics])
+
+    view_and_metrics = widgets.HBox([view._renderer, metrics_box])
+    is_selected = widgets.Checkbox(value=True)
+
+    return widgets.VBox([is_selected, view_and_metrics])
+
+
+def select_spines_widget(spine_meshes: List[Polyhedron_3],
+                         dendrite_mesh: Polyhedron_3,
+                         metrics: List[List[SpineMetric]]) -> widgets.Widget:
+
+    dendrite_v_f: Tuple = _mesh_to_v_f(dendrite_mesh)
+    spine_previews = [_get_spine_preview_widget(_mesh_to_v_f(spine_mesh),
+                                                dendrite_v_f, metrics[i])
+                      for i, spine_mesh in enumerate(spine_meshes)]
+
+    spine_selection = [True for _ in range(len(spine_meshes))]
+    for i in range(len(spine_previews)):
+        # set callback for checkbox value change
+        # (capture i value as argument default value)
+        def update_spine_selection(change: Dict, i=i) -> None:
+            if change["name"] == "value":
+                spine_selection[i] = change["new"]
+        spine_previews[i].children[0].observe(update_spine_selection)
+
+    def show_indexed_spine(index: int):
         print(index)
-        show_3d_mesh(spine_meshes[index])
-    return show_spine
+        display(spine_previews[index])
+
+        # return reference to         
+        return spine_selection
+
+    slider = widgets.IntSlider(min=0, max=len(spine_meshes) - 1)
+    
+    return widgets.interactive(show_indexed_spine, index=slider)
+
+
+def _segmentation_to_colors(vertices: np.ndarray,
+                            segmentation: Segmentation) -> np.ndarray:
+    colors = np.ndarray((vertices.shape[0], 3))
+    for i, vertex in enumerate(vertices):
+        if segmentation[hash_point(list_2_point(vertex))]:
+            colors[i] = RED
+        else:
+            colors[i] = GREEN
+    return colors
 
 
 def interactive_segmentation(mesh: Polyhedron_3, correspondence,
@@ -125,33 +182,27 @@ def interactive_segmentation(mesh: Polyhedron_3, correspondence,
     return widgets.interactive(do_segmentation, sensitivity=slider)
 
 
-def _segmentation_to_colors(vertices, segmentation: Segmentation):
-    colors = np.ndarray((vertices.shape[0], 3))
-    for i, vertex in enumerate(vertices):
-        if segmentation[hash_point(list_2_point(vertex))]:
-            colors[i] = RED
-        else:
-            colors[i] = GREEN
-    return colors
-
-
 def show_segmented_mesh(mesh: Polyhedron_3, segmentation: Segmentation):
     vertices, facets = _mesh_to_v_f(mesh)
-    colors = np.ndarray((vertices.shape[0], 3))
-    for i, vertex in enumerate(vertices):
-        if segmentation[hash_point(list_2_point(vertex))]:
-            colors[i] = RED
-        else:
-            colors[i] = GREEN
-    mp.plot(vertices, facets, c=colors)
+    colors = _segmentation_to_colors(vertices, segmentation)
+    plot = mp.plot(vertices, facets, c=colors)
 
 
 if __name__ == "__main__":
+    # load mesh and segmentation
     mesh = Polyhedron_3("output/surface_mesh.off")
+    segmentation = load_segmentation("output/segmentation.json")
 
-    segmentation = {}
-    for v in mesh.points():
-        segmentation[hash_point(v)] = bool(random.getrandbits(1))
+    # extract spine meshes
+    from spine_segmentation import get_spine_meshes
+    spine_meshes = get_spine_meshes(mesh, segmentation)
 
-    mp.offline()
-    show_segmented_mesh(mesh, segmentation)
+    # calculate metrics for each spine
+    from spine_metrics import make_metrics
+    metric_names = ["Area", "Volume"]
+    metrics = []
+    for spine_mesh in spine_meshes:
+        metrics.append(make_metrics(spine_mesh, metric_names))
+    
+    selection_widget = select_spines_widget(spine_meshes, mesh, metrics)
+    display(selection_widget)
