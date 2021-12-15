@@ -11,7 +11,6 @@ from CGAL.CGAL_Point_set_3 import Point_set_3
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3, Polyhedron_3_Halfedge_handle, \
     Polyhedron_3_Vertex_handle, Polyhedron_3_Facet_handle, Polyhedron_3_Halfedge_around_facet_circulator
 from CGAL.CGAL_Polygon_mesh_processing import Polylines, connected_components
-import open3d as o3d
 from skimage.filters import threshold_local
 import json
 
@@ -43,11 +42,14 @@ def load_tif(filename: str) -> np.ndarray:
     return result
 
 
-def image_binarization(image: np.ndarray, block_size: int = 3) -> np.ndarray:
+def local_threshold_3d(image: np.ndarray, base_threshold: int = 127,
+                       weight: float = 0.05, block_size: int = 3) -> np.ndarray:
     output = np.zeros_like(image)
-    
+
     for z in range(image.shape[2]):
-        output[:, :, z] = threshold_local(image[:, :, z], block_size)
+        local_mean = threshold_local(image[:, :, z], block_size=block_size)
+        threshold = base_threshold + weight * (base_threshold - local_mean)
+        output[:, :, z] = image[:, :, z] > threshold
 
     return output
 
@@ -334,3 +336,4 @@ def save_segmentation(segmentation: Segmentation, filename: str) -> None:
 def load_segmentation(filename: str) -> Segmentation:
     with open(filename, 'r') as file:
         return json.load(file)
+

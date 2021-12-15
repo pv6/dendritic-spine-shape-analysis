@@ -4,7 +4,7 @@ from ipywidgets import widgets
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3
 from typing import List, Tuple, Dict
 from spine_segmentation import point_2_list, list_2_point, hash_point, \
-    Segmentation, segmentation_by_distance, load_segmentation
+    Segmentation, segmentation_by_distance, load_segmentation, local_threshold_3d
 import meshplot as mp
 from IPython.display import display
 from spine_metrics import SpineMetric
@@ -64,41 +64,6 @@ def _show_cross_planes(ax, coord_1, coord_2, shape, color_1, color_2, border_col
     ax.plot((shape[1] - 1, shape[1] - 1), (0, shape[0] - 1), color=border_color, lw=3)
 
 
-def show_3d_image(data: np.ndarray, cmap="gray"):
-    @widgets.interact(
-        x=widgets.IntSlider(min=0, max=data.shape[1] - 1, continuous_update=False),
-        y=widgets.IntSlider(min=0, max=data.shape[0] - 1, continuous_update=False),
-        z=widgets.IntSlider(min=0, max=data.shape[2] - 1, continuous_update=False),
-        layout=widgets.Layout(width='500px'))
-    def display_slice(x, y, z):
-        fig, ax = plt.subplots(2, 2, figsize=(15, 5),
-                               gridspec_kw={
-                                   'width_ratios': [data.shape[2],
-                                                    data.shape[1]],
-                                   'height_ratios': [data.shape[2],
-                                                     data.shape[0]]
-                               })
-
-        data_x = data[:, x, :]
-        data_y = data[y, :, :].transpose()
-        data_z = data[:, :, z]
-
-        ax[0, 0].axis("off")
-        _show_image(ax[1, 0], data_x, title=f"X = {x}", cmap=cmap)
-        _show_image(ax[0, 1], data_y, title=f"Y = {y}", cmap=cmap)
-        _show_image(ax[1, 1], data_z, title=f"Z = {z}", cmap=cmap)
-
-        _show_cross_planes(ax[1, 0], z, y, data_x.shape, "blue", "green", "red")
-        _show_cross_planes(ax[0, 1], x, z, data_y.shape, "red", "blue", "green")
-        _show_cross_planes(ax[1, 1], x, y, data_z.shape, "red", "green", "blue")
-
-        plt.tight_layout()
-
-        plt.show()
-
-    return display_slice
-
-
 def make_viewer(v: np.ndarray, f: np.ndarray, c=None) -> mp.Viewer:
     view = mp.Viewer({})
     view.add_mesh(v, f, c)
@@ -134,7 +99,7 @@ def select_spines_widget(spine_meshes: List[Polyhedron_3],
     spine_selection = [True for _ in range(len(spine_meshes))]
     for i in range(len(spine_previews)):
         # set callback for checkbox value change
-        # (capture i value as argument default value)
+        # (capture i value via argument default value)
         def update_spine_selection(change: Dict, i=i) -> None:
             if change["name"] == "value":
                 spine_selection[i] = change["new"]
@@ -206,3 +171,118 @@ if __name__ == "__main__":
     
     selection_widget = select_spines_widget(spine_meshes, mesh, metrics)
     display(selection_widget)
+
+
+def show_sliced_image(image, x, y, z, cmap="gray", title=""):
+    fig, ax = plt.subplots(2, 2, figsize=(15, 5),
+                           gridspec_kw={
+                               'width_ratios': [image.shape[2],
+                                                image.shape[1]],
+                               'height_ratios': [image.shape[2],
+                                                 image.shape[0]]
+                           })
+
+    if title != "":
+        fig.suptitle(title)
+
+    data_x = image[:, x, :]
+    data_y = image[y, :, :].transpose()
+    data_z = image[:, :, z]
+
+    ax[0, 0].axis("off")
+    _show_image(ax[1, 0], data_x, title=f"X = {x}", cmap=cmap)
+    _show_image(ax[0, 1], data_y, title=f"Y = {y}", cmap=cmap)
+    _show_image(ax[1, 1], data_z, title=f"Z = {z}", cmap=cmap)
+
+    _show_cross_planes(ax[1, 0], z, y, data_x.shape, "blue", "green", "red")
+    _show_cross_planes(ax[0, 1], x, z, data_y.shape, "red", "blue", "green")
+    _show_cross_planes(ax[1, 1], x, y, data_z.shape, "red", "green", "blue")
+
+    plt.tight_layout()
+    plt.show()
+
+
+def show_3d_image(data: np.ndarray, cmap="gray"):
+    @widgets.interact(
+        x=widgets.IntSlider(min=0, max=data.shape[1] - 1, continuous_update=False),
+        y=widgets.IntSlider(min=0, max=data.shape[0] - 1, continuous_update=False),
+        z=widgets.IntSlider(min=0, max=data.shape[2] - 1, continuous_update=False),
+        layout=widgets.Layout(width='500px'))
+    def display_slice(x, y, z):
+        show_sliced_image(data, x, y, z, cmap)
+
+    return display_slice
+
+
+class Image3DRenderer:
+    _x: int
+    _y: int
+    _z: int
+
+    _images: List[Tuple[np.ndarray, str]]
+
+    def __init__(self):
+        self._x = -1
+        self._y = -1
+        self._z = -1
+
+    @property
+    def images(self) -> List[Tuple[np.ndarray, str]]:
+        return self._images.copy()
+
+    @images.setter
+    def images(self, value: List[Tuple[np.ndarray, str]]) -> None:
+        self._images = value.copy()
+
+    def show(self, cmap="gray"):
+        shape = self._images[0][0].shape
+
+        if self._x < 0:
+            self._x = shape[1] // 2
+        if self._y < 0:
+            self._y = shape[0] // 2
+        if self._z < 0:
+            self._z = shape[2] // 2
+
+        @widgets.interact(x=widgets.IntSlider(value=self._x, min=0,
+                                              max=shape[1] - 1,
+                                              continuous_update=False),
+                          y=widgets.IntSlider(value=self._y, min=0,
+                                              max=shape[0] - 1,
+                                              continuous_update=False),
+                          z=widgets.IntSlider(value=self._z, min=0,
+                                              max=shape[2] - 1,
+                                              continuous_update=False))
+        def display_slice(x, y, z):
+            self._x = x
+            self._y = y
+            self._z = z
+            for i, (image, title) in enumerate(self._images):
+                show_sliced_image(image, x, y, z, cmap=cmap, title=title)
+
+        return display_slice
+
+
+def interactive_binarization(image: np.ndarray) -> widgets.Widget:
+    base_threshold_slider = widgets.IntSlider(min=0, max=255, value=127,
+                                              continuous_update=False)
+    weight_slider = widgets.IntSlider(min=0, max=100, value=5,
+                                      continuous_update=False)
+    block_size_slider = widgets.IntSlider(min=1, max=31, value=3, step=2,
+                                          continuous_update=False)
+
+    image_renderer = Image3DRenderer()
+
+    def show_binarization(base_threshold: int, weight: int, block_size: int) -> np.ndarray:
+        result = local_threshold_3d(image, base_threshold=base_threshold,
+                                    weight=weight / 100, block_size=block_size)
+        image_renderer.images = [(image, "Source Image"),
+                                 (result, "Binarization Result")]
+        image_renderer.show()
+
+        return result
+
+    return widgets.interactive(show_binarization,
+                               base_threshold=base_threshold_slider,
+                               weight=weight_slider,
+                               block_size=block_size_slider)
