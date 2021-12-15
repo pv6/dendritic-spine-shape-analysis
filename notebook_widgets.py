@@ -4,7 +4,7 @@ from ipywidgets import widgets
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3
 from typing import List, Tuple, Dict
 from spine_segmentation import point_2_list, list_2_point, hash_point, \
-    Segmentation, segmentation_by_distance, load_segmentation, local_threshold_3d
+    Segmentation, segmentation_by_distance, local_threshold_3d
 import meshplot as mp
 from IPython.display import display
 from spine_metrics import SpineMetric
@@ -121,7 +121,7 @@ def _segmentation_to_colors(vertices: np.ndarray,
                             segmentation: Segmentation) -> np.ndarray:
     colors = np.ndarray((vertices.shape[0], 3))
     for i, vertex in enumerate(vertices):
-        if segmentation[hash_point(list_2_point(vertex))]:
+        if hash_point(list_2_point(vertex)) in segmentation:
             colors[i] = RED
         else:
             colors[i] = GREEN
@@ -150,27 +150,7 @@ def interactive_segmentation(mesh: Polyhedron_3, correspondence,
 def show_segmented_mesh(mesh: Polyhedron_3, segmentation: Segmentation):
     vertices, facets = _mesh_to_v_f(mesh)
     colors = _segmentation_to_colors(vertices, segmentation)
-    plot = mp.plot(vertices, facets, c=colors)
-
-
-if __name__ == "__main__":
-    # load mesh and segmentation
-    mesh = Polyhedron_3("output/surface_mesh.off")
-    segmentation = load_segmentation("output/segmentation.json")
-
-    # extract spine meshes
-    from spine_segmentation import get_spine_meshes
-    spine_meshes = get_spine_meshes(mesh, segmentation)
-
-    # calculate metrics for each spine
-    from spine_metrics import make_metrics
-    metric_names = ["Area", "Volume"]
-    metrics = []
-    for spine_mesh in spine_meshes:
-        metrics.append(make_metrics(spine_mesh, metric_names))
-    
-    selection_widget = select_spines_widget(spine_meshes, mesh, metrics)
-    display(selection_widget)
+    mp.plot(vertices, facets, c=colors)
 
 
 def show_sliced_image(image, x, y, z, cmap="gray", title=""):
@@ -286,3 +266,4 @@ def interactive_binarization(image: np.ndarray) -> widgets.Widget:
                                base_threshold=base_threshold_slider,
                                weight=weight_slider,
                                block_size=block_size_slider)
+

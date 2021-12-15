@@ -18,8 +18,8 @@ class SpineMetric:
         pass
 
 
-def make_metrics(spine_mesh: Polyhedron_3,
-                 metric_names: List[str]) -> List[SpineMetric]:
+def calculate_metrics(spine_mesh: Polyhedron_3,
+                      metric_names: List[str]) -> List[SpineMetric]:
     out = []
     for name in metric_names:
         klass = globals()[name.capitalize() + "SpineMetric"]

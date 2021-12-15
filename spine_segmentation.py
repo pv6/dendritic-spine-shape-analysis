@@ -13,11 +13,12 @@ from CGAL.CGAL_Polyhedron_3 import Polyhedron_3, Polyhedron_3_Halfedge_handle, \
 from CGAL.CGAL_Polygon_mesh_processing import Polylines, connected_components
 from skimage.filters import threshold_local
 import json
+from scipy.ndimage.filters import median_filter
 
 
 Correspondence = Dict[str, Point_3]
 ReverseCorrespondence = Dict[str, List[Point_3]]
-Segmentation = Dict[str, bool]
+Segmentation = Set[str]
 
 
 def load_tif(filename: str) -> np.ndarray:
@@ -44,12 +45,13 @@ def load_tif(filename: str) -> np.ndarray:
 
 def local_threshold_3d(image: np.ndarray, base_threshold: int = 127,
                        weight: float = 0.05, block_size: int = 3) -> np.ndarray:
-    output = np.zeros_like(image)
-
-    for z in range(image.shape[2]):
-        local_mean = threshold_local(image[:, :, z], block_size=block_size)
-        threshold = base_threshold + weight * (base_threshold - local_mean)
-        output[:, :, z] = image[:, :, z] > threshold
+    local_median = median_filter(image, size=block_size)
+    threshold = base_threshold + weight * (base_threshold - local_median)
+    output = image > threshold
+    # for z in range(image.shape[2]):
+    #     local_mean = threshold_local(image[:, :, z], block_size=block_size)
+    #     threshold = base_threshold + weight * (base_threshold - local_mean)
+    #     output[:, :, z] = image[:, :, z] > threshold
 
     return output
 
@@ -250,7 +252,7 @@ def segmentation_by_distance(polyhedron: Polyhedron_3,
     all_distance = np.concatenate([x for x in path_statistics.values()])
     distance_threshold = np.quantile(all_distance, distance_sensitivity)
 
-    output_segmentation: Dict[str, bool] = {}
+    output_segmentation: Segmentation = set()
     # make set for performance
     dendrite_set: Set = set(dendrite_skeleton_points)
     for surface_point in polyhedron.points():
@@ -260,15 +262,16 @@ def segmentation_by_distance(polyhedron: Polyhedron_3,
         if hashed_skeleton_point in dendrite_set:
             # skeleton point belongs to dendrite subgraph
             distance = get_distance(surface_point, skeleton_point)
-            output_segmentation[hashed_surface_point] = distance > distance_threshold
+            if distance > distance_threshold:
+                output_segmentation.add(hashed_surface_point)
         else:
             # skeleton point belongs to spine subgraph
-            output_segmentation[hashed_surface_point] = True
+            output_segmentation.add(hashed_surface_point)
 
     return output_segmentation
 
 
-def get_spine_meshes(in_mesh: Polyhedron_3, segmentation) -> List[Polyhedron_3]:
+def get_spine_meshes(in_mesh: Polyhedron_3, segmentation: Segmentation) -> List[Polyhedron_3]:
     # copy mesh
     mesh: Polyhedron_3 = in_mesh.deepcopy()
 
@@ -280,7 +283,7 @@ def get_spine_meshes(in_mesh: Polyhedron_3, segmentation) -> List[Polyhedron_3]:
             halfedge: Polyhedron_3_Halfedge_handle = circulator.next()
             v: Polyhedron_3_Vertex_handle = halfedge.vertex()
 
-            if not segmentation[hash_point(v.point())]:
+            if not hash_point(v.point()) in segmentation:
                 mesh.erase_facet(facet.halfedge())
                 break
             # check for end of loop
@@ -321,19 +324,28 @@ def get_spine_meshes(in_mesh: Polyhedron_3, segmentation) -> List[Polyhedron_3]:
     return output
 
 
-def save_segmentation(segmentation: Segmentation, filename: str) -> None:
-    # from https://stackoverflow.com/a/67572570
-    class CustomJSONizer(json.JSONEncoder):
-        def default(self, obj):
-            return super().encode(bool(obj)) \
-                if isinstance(obj, np.bool_) \
-                else super().default(obj)
+# def save_segmentation(segmentation: Segmentation, filename: str) -> None:
+#     # from https://stackoverflow.com/a/67572570
+#     class CustomJSONizer(json.JSONEncoder):
+#         def default(self, obj):
+#             return super().encode(bool(obj)) \
+#                 if isinstance(obj, np.bool_) \
+#                 else super().default(obj)
+#
+#     with open(filename, "w") as file:
+#         json.dump(segmentation, file, cls=CustomJSONizer)
+#
+#
+# def load_segmentation(filename: str) -> Segmentation:
+#     with open(filename, 'r') as file:
+#         return json.load(file)
 
-    with open(filename, "w") as file:
-        json.dump(segmentation, file, cls=CustomJSONizer)
 
+def get_final_segmentation(spines: List[Polyhedron_3]) -> Segmentation:
+    result: Segmentation = set()
+    for spine in spines:
+        for point in spine.points():
+            result.add(hash_point(point))
+    return result
 
-def load_segmentation(filename: str) -> Segmentation:
-    with open(filename, 'r') as file:
-        return json.load(file)
 
