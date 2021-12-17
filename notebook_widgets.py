@@ -14,6 +14,8 @@ RED = (1, 0, 0)
 GREEN = (0, 1, 0)
 BLUE = (0, 0, 1)
 WHITE = (1, 1, 1)
+YELLOW = (1, 1, 0)
+GRAY = (0.5, 0.5, 0.5)
 
 
 def _mesh_to_v_f(mesh: Polyhedron_3) -> Tuple[np.ndarray, np.ndarray]:
@@ -70,8 +72,30 @@ def make_viewer(v: np.ndarray, f: np.ndarray, c=None) -> mp.Viewer:
     return view
 
 
+class SpinePreview:
+    widget: widgets.Widget
+    view: mp.Viewer
+    is_selected: widgets.Checkbox
+
+    _selected_colors: np.ndarray
+    _unselected_colors: np.ndarray
+
+    def __init__(self, widget: widgets.Widget, view: mp.Viewer,
+                 is_selected: widgets.Checkbox, size_of_v: int) -> None:
+        self.widget = widget
+        self.view = view
+        self.is_selected = is_selected
+        self._selected_colors = np.ndarray((size_of_v, 3))
+        self._selected_colors[:] = YELLOW
+        self._unselected_colors = np.ndarray((size_of_v, 3))
+        self._unselected_colors[:] = GRAY
+
+    def set_selected(self, value: bool) -> None:
+        self.view.update_object(colors=self._selected_colors if value else self._unselected_colors)
+
+
 def _get_spine_preview_widget(spine_v_f: Tuple, dendrite_v_f: Tuple,
-                              metrics: List[SpineMetric]) -> widgets.VBox:
+                              metrics: List[SpineMetric]) -> SpinePreview:
     view = make_viewer(*spine_v_f)
     # view.add_mesh(*dendrite_v_f, shading={"wireframe": True})
     # (v, f) = dendrite_v_f
@@ -84,7 +108,8 @@ def _get_spine_preview_widget(spine_v_f: Tuple, dendrite_v_f: Tuple,
     view_and_metrics = widgets.HBox([view._renderer, metrics_box])
     is_selected = widgets.Checkbox(value=True)
 
-    return widgets.VBox([is_selected, view_and_metrics])
+    return SpinePreview(widgets.VBox([is_selected, view_and_metrics]), view,
+                        is_selected, len(spine_v_f[0]))
 
 
 def select_spines_widget(spine_meshes: List[Polyhedron_3],
@@ -97,17 +122,19 @@ def select_spines_widget(spine_meshes: List[Polyhedron_3],
                       for i, spine_mesh in enumerate(spine_meshes)]
 
     spine_selection = [True for _ in range(len(spine_meshes))]
-    for i in range(len(spine_previews)):
+    for i, preview in enumerate(spine_previews):
         # set callback for checkbox value change
         # (capture i value via argument default value)
         def update_spine_selection(change: Dict, i=i) -> None:
             if change["name"] == "value":
-                spine_selection[i] = change["new"]
-        spine_previews[i].children[0].observe(update_spine_selection)
+                value = change["new"]
+                spine_selection[i] = value
+                spine_previews[i].set_selected(value)
+        preview.is_selected.observe(update_spine_selection)
 
     def show_indexed_spine(index: int):
         print(index)
-        display(spine_previews[index])
+        display(spine_previews[index].widget)
 
         # return reference to         
         return spine_selection
@@ -205,6 +232,7 @@ class Image3DRenderer:
         self._x = -1
         self._y = -1
         self._z = -1
+        self._images: List[Tuple[np.ndarray, str]] = []
 
     @property
     def images(self) -> List[Tuple[np.ndarray, str]]:
@@ -266,4 +294,3 @@ def interactive_binarization(image: np.ndarray) -> widgets.Widget:
                                base_threshold=base_threshold_slider,
                                weight=weight_slider,
                                block_size=block_size_slider)
-

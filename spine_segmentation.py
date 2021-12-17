@@ -11,7 +11,6 @@ from CGAL.CGAL_Point_set_3 import Point_set_3
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3, Polyhedron_3_Halfedge_handle, \
     Polyhedron_3_Vertex_handle, Polyhedron_3_Facet_handle, Polyhedron_3_Halfedge_around_facet_circulator
 from CGAL.CGAL_Polygon_mesh_processing import Polylines, connected_components
-from skimage.filters import threshold_local
 import json
 from scipy.ndimage.filters import median_filter
 
