@@ -10,7 +10,7 @@ from CGAL.CGAL_Kernel import Vector_3
 from CGAL.CGAL_Point_set_3 import Point_set_3
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3, Polyhedron_3_Halfedge_handle, \
     Polyhedron_3_Vertex_handle, Polyhedron_3_Facet_handle, Polyhedron_3_Halfedge_around_facet_circulator
-from CGAL.CGAL_Polygon_mesh_processing import Polylines, connected_components
+from CGAL.CGAL_Polygon_mesh_processing import Polylines, remove_connected_components, keep_connected_components
 import json
 from scipy.ndimage.filters import median_filter
 
@@ -270,7 +270,8 @@ def segmentation_by_distance(polyhedron: Polyhedron_3,
     return output_segmentation
 
 
-def get_spine_meshes(in_mesh: Polyhedron_3, segmentation: Segmentation) -> List[Polyhedron_3]:
+def _erase_dendrite_facets(in_mesh: Polyhedron_3,
+                           segmentation: Segmentation) -> Polyhedron_3:
     # copy mesh
     mesh: Polyhedron_3 = in_mesh.deepcopy()
 
@@ -288,34 +289,47 @@ def get_spine_meshes(in_mesh: Polyhedron_3, segmentation: Segmentation) -> List[
             # check for end of loop
             if circulator == begin:
                 break
+    return mesh
+    
 
-    components = connected_components(mesh)
-    num_of_components = max(components) + 1
+def get_spine_meshes(in_mesh: Polyhedron_3, segmentation: Segmentation) -> List[Polyhedron_3]:
+    mesh: Polyhedron_3 = _erase_dendrite_facets(in_mesh, segmentation)
 
+    # set halfedge ids
+    for i, halfedge in enumerate(mesh.halfedges()):
+        halfedge.set_id(i)
+
+    # determine halfedges corresponding to connected components
+    component_halfedge_ids: List[int] = []
+    reduced_mesh: Polyhedron_3 = mesh.deepcopy()
+    while reduced_mesh.size_of_facets() > 0:
+        facet: Polyhedron_3_Facet_handle = reduced_mesh.facets().next()
+        component_halfedge_ids.append(facet.halfedge().id())
+        remove_connected_components(reduced_mesh, [facet])
+
+    # extract connected components one by one
     output = []
-    for i in range(num_of_components):
+    for halfedge_id in component_halfedge_ids:
         spine_mesh: Polyhedron_3 = mesh.deepcopy()
-
-        # remove other spines from mesh
-        for j, facet in enumerate(spine_mesh.facets()):
-            if components[j] != i:
-                spine_mesh.erase_facet(facet.halfedge())
-
-        # remove small meshes
+        # find facet with correct halfedge id
+        component_facet: Polyhedron_3_Facet_handle = spine_mesh.facets().next()
+        for halfedge in spine_mesh.halfedges():
+            if halfedge.id() == halfedge_id:
+                component_facet = halfedge.facet()
+                break
+        keep_connected_components(spine_mesh, [component_facet])
+        # filter small meshes
         if spine_mesh.size_of_facets() <= 10:
             continue
-
         # fill holes
         for h in spine_mesh.halfedges():
             a = Polyhedron_3_Halfedge_handle()
             if h.is_border():
                 spine_mesh.fill_hole(h)
-
         # triangulate non-triangle facets via center vertex
         for facet in spine_mesh.facets():
             if not facet.is_triangle():
                 spine_mesh.create_center_vertex(facet.halfedge())
-
         output.append(spine_mesh)
 
     print(f"Detected {len(output)} spines")
