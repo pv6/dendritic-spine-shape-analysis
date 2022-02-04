@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from ipywidgets import widgets
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3
+from CGAL.CGAL_Kernel import Vector_3, Point_3
 from typing import List, Tuple, Dict
 from spine_segmentation import point_2_list, list_2_point, hash_point, \
     Segmentation, segmentation_by_distance, local_threshold_3d
@@ -43,6 +44,25 @@ def _mesh_to_v_f(mesh: Polyhedron_3) -> Tuple[np.ndarray, np.ndarray]:
 def show_3d_mesh(mesh: Polyhedron_3) -> None:
     vertices, facets = _mesh_to_v_f(mesh)
     mp.plot(vertices, facets)
+
+
+def show_line_set(lines: List[Tuple[Point_3, Point_3]], mesh) -> None:
+    # make vertices and facets
+    vertices = np.ndarray((len(lines) * 2, 3))
+    facets = np.ndarray((len(lines), 3)).astype("uint")
+    for i, line in enumerate(lines):
+        vertices[2 * i, :] = point_2_list(line[0])
+        vertices[2 * i + 1, :] = point_2_list(line[1])
+
+        facets[i, 0] = 2 * i
+        facets[i, 1] = 2 * i + 1
+        facets[i, 2] = 2 * i
+
+    # render
+    plot = mp.plot(vertices, facets, shading={"wireframe": True})
+    v, f = _mesh_to_v_f(mesh)
+    plot.add_lines(v[f[:, 0]], v[f[:, 1]], shading={"line_color": "gray"})
+    # plot.add_mesh(*_mesh_to_v_f(mesh), shading={"wireframe": True})
 
 
 def _show_image(ax, image, cmap="gray", title=None):
