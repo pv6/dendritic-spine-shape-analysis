@@ -46,7 +46,8 @@ def local_threshold_3d(image: np.ndarray, base_threshold: int = 127,
                        weight: float = 0.05, block_size: int = 3) -> np.ndarray:
     local_median = median_filter(image, size=block_size)
     threshold = base_threshold + weight * (base_threshold - local_median)
-    output = image > threshold
+    output = np.zeros_like(image)
+    output[image > threshold] = 255
     # for z in range(image.shape[2]):
     #     local_mean = threshold_local(image[:, :, z], block_size=block_size)
     #     threshold = base_threshold + weight * (base_threshold - local_mean)

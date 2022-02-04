@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
 import numpy as np
 from ipywidgets import widgets
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3
@@ -9,6 +10,7 @@ from spine_segmentation import point_2_list, list_2_point, hash_point, \
 import meshplot as mp
 from IPython.display import display
 from spine_metrics import SpineMetric
+from scipy.ndimage.measurements import label
 
 
 RED = (1, 0, 0)
@@ -66,7 +68,7 @@ def show_line_set(lines: List[Tuple[Point_3, Point_3]], mesh) -> None:
 
 
 def _show_image(ax, image, cmap="gray", title=None):
-    ax.imshow(image, cmap=cmap)
+    ax.imshow(image, norm=Normalize(0, 255), cmap=cmap)
 
     if title:
         ax.set_title(title)
@@ -314,3 +316,43 @@ def interactive_binarization(image: np.ndarray) -> widgets.Widget:
                                base_threshold=base_threshold_slider,
                                weight=weight_slider,
                                block_size=block_size_slider)
+
+
+def select_connected_component_widget(binary_image: np.ndarray) ->widgets.Widget:
+    # find connected components
+    labels, num_of_components = label(binary_image)
+
+    # sort labels by size
+    unique, counts = np.unique(labels, return_counts=True)
+    unique = unique.tolist()
+    counts = counts.tolist()
+    unique.sort(key=lambda x: counts[x], reverse=True)
+    counts.sort(reverse=True)
+
+    # filter background and too small labels
+    used_labels = []
+    for i, count in enumerate(counts):
+        if count >= 10 and unique[i] != 0:
+            used_labels.append(unique[i])
+
+    image_renderer = Image3DRenderer()
+
+    label_index_slider = widgets.IntSlider(min=0, max=len(used_labels) - 1,
+                                           continuous_update=False)
+
+    def show_component(label_index: int) -> np.ndarray:
+        lbl = used_labels[label_index]
+
+        component = np.zeros_like(binary_image)
+        component[labels == lbl] = 255
+
+        preview = binary_image.copy()
+        preview[preview > 0] = 64
+        preview[labels == lbl] = 255
+
+        image_renderer.images = [(preview, "Selected Connected Component")]
+        image_renderer.show()
+
+        return component
+
+    return widgets.interactive(show_component, label_index=label_index_slider)
