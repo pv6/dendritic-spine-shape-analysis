@@ -66,8 +66,9 @@ def get_surface_points(image: np.ndarray) -> Point_set_3:
     # find surface points
     erosion = binary_erosion(image).astype(image.dtype) * 255
     edges = image - erosion
-    surface_points: np.ndarray = np.argwhere(edges > 0)
 
+    surface_points: np.ndarray = np.argwhere(edges > 0)
+    
     # calculate normals
     out: Point_set_3 = Point_set_3()
     out.add_normal_map()
@@ -338,28 +339,32 @@ def get_spine_meshes(in_mesh: Polyhedron_3, segmentation: Segmentation) -> List[
     return output
 
 
-# def save_segmentation(segmentation: Segmentation, filename: str) -> None:
-#     # from https://stackoverflow.com/a/67572570
-#     class CustomJSONizer(json.JSONEncoder):
-#         def default(self, obj):
-#             return super().encode(bool(obj)) \
-#                 if isinstance(obj, np.bool_) \
-#                 else super().default(obj)
-#
-#     with open(filename, "w") as file:
-#         json.dump(segmentation, file, cls=CustomJSONizer)
-#
-#
-# def load_segmentation(filename: str) -> Segmentation:
-#     with open(filename, 'r') as file:
-#         return json.load(file)
+def save_segmentation(segmentation: Segmentation, filename: str) -> None:
+    # from https://stackoverflow.com/a/67572570
+    class CustomJSONizer(json.JSONEncoder):
+        def default(self, obj):
+            return super().encode(bool(obj)) \
+                if isinstance(obj, np.bool_) \
+                else super().default(obj)
+
+    data = {point: True for point in segmentation}
+    with open(filename, "w") as file:
+        json.dump(data, file, cls=CustomJSONizer)
 
 
-def get_final_segmentation(spines: List[Polyhedron_3]) -> Segmentation:
+def load_segmentation(filename: str) -> Segmentation:
+    with open(filename, 'r') as file:
+        dict_data = json.load(file)
+        output = set()
+        for key in dict_data:
+            if dict_data[key]:
+                output.add(key)
+        return output
+
+
+def spines_to_segmentation(spines: List[Polyhedron_3]) -> Segmentation:
     result: Segmentation = set()
     for spine in spines:
         for point in spine.points():
             result.add(hash_point(point))
     return result
-
-
