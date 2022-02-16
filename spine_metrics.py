@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from random import Random
 import numpy as np
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, Dict
 import ipywidgets as widgets
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3, Polyhedron_3_Facet_handle
 from CGAL.CGAL_Polygon_mesh_processing import area, volume
@@ -9,20 +9,37 @@ from CGAL.CGAL_Kernel import Ray_3, Point_3, Vector_3
 from CGAL.CGAL_AABB_tree import AABB_tree_Polyhedron_3_Facet_handle
 from spine_segmentation import point_2_list
 from matplotlib import pyplot as plt
+import csv
 
 
 class SpineMetric(ABC):
     name: str
     value: Any
 
-    def __init__(self, spine_mesh: Polyhedron_3):
+    def __init__(self, spine_mesh: Polyhedron_3) -> None:
         self.value = self._calculate(spine_mesh)
 
     @abstractmethod
     def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
         pass
 
-    def show(self):
+    def show(self) -> None:
+        pass
+
+    def value_as_list(self) -> List[Any]:
+        try:
+            return [*self.value]
+        except TypeError:
+            return [self.value]
+
+
+class CustomSpineMetric(SpineMetric):
+    def __init__(self, name: str, value: Any) -> None:
+        super().__init__(Polyhedron_3())
+        self.value = value
+        self.name = name
+
+    def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
         pass
 
 
@@ -33,6 +50,46 @@ def calculate_metrics(spine_mesh: Polyhedron_3,
         klass = globals()[name + "SpineMetric"]
         out.append(klass(spine_mesh))
     return out
+
+
+SPINE_FILE_FIELD = "Spine File"
+
+
+def save_metrics(metrics: Dict[str, List[SpineMetric]], filename: str) -> None:
+    with open(filename, mode="w") as file:
+        if len(metrics) == 0:
+            return
+        # extract from metric names from first spine
+        metric_names = [metric.name for metric in list(metrics.values())[0]]
+
+        # save metrics for each spine
+        writer = csv.DictWriter(file, fieldnames=[SPINE_FILE_FIELD] + metric_names)
+        writer.writeheader()
+        for spine_name in metrics.keys():
+            writer.writerow({SPINE_FILE_FIELD: spine_name,
+                             **{metric.name: metric.value
+                                for metric in metrics[spine_name]}})
+
+
+def load_metrics(filename: str) -> Dict[str, List[SpineMetric]]:
+    output = {}
+    with open(filename, mode="r") as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            # extract spine file name
+            spine_name = row.pop(SPINE_FILE_FIELD)
+            # extract each metric
+            metrics = []
+            for metric_name in row.keys():
+                value_str = row[metric_name]
+                value = None
+                if value_str[0] == "[":
+                    value = np.fromstring(value_str[1:-1], dtype="float", sep=" ")
+                else:
+                    value = float(value_str)
+                metrics.append(CustomSpineMetric(metric_name, value))
+            output[spine_name] = metrics
+    return output
 
 
 class FloatSpineMetric(SpineMetric, ABC):
@@ -83,7 +140,7 @@ class HistogramSpineMetric(SpineMetric):
 
     def _calculate(self, spine_mesh: Polyhedron_3) -> np.array:
         self.distribution = self._calculate_distribution(spine_mesh)
-        return np.histogram(self.distribution, self.num_of_bins, density=True)
+        return np.histogram(self.distribution, self.num_of_bins, density=True)[0]
 
 
 class ChordDistributionSpineMetric(HistogramSpineMetric):

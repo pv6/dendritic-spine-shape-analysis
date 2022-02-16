@@ -209,8 +209,8 @@ def select_spines_widget(spine_meshes: List[Polyhedron_3],
     def show_indexed_spine(index: int):
         display(spine_previews[index].widget)
 
-        # return reference to         
-        return spine_selection
+        # return indices of selected spines
+        return [i for i, is_selected in enumerate(spine_selection) if is_selected]
 
     slider = widgets.IntSlider(min=0, max=len(spine_meshes) - 1)
     
