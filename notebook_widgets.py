@@ -233,6 +233,32 @@ class SpinePreview:
         self.dendrite_viewer.update_object(colors=self._get_dendrite_colors())
 
 
+def _make_navigation_widget(slider: widgets.IntSlider) -> widgets.Widget:
+    next_button = widgets.Button(description=">")
+    prev_button = widgets.Button(description="<")
+
+    def disable_buttons(change=None) -> None:
+        next_button.disabled = slider.value >= slider.max
+        prev_button.disabled = slider.value <= slider.min
+        
+    disable_buttons()
+    slider.observe(disable_buttons)
+
+    def next_callback(button: widgets.Button) -> None:
+        slider.value += 1
+        disable_buttons()
+
+    def prev_callback(button: widgets.Button) -> None:
+        slider.value -= 1
+        disable_buttons()
+
+    next_button.on_click(next_callback)
+    prev_button.on_click(prev_callback)
+
+    box = widgets.HBox([prev_button, next_button])
+    return box
+    
+
 def select_spines_widget(spine_meshes: List[Polyhedron_3],
                          dendrite_mesh: Polyhedron_3,
                          metrics: List[List[SpineMetric]]) -> widgets.Widget:
@@ -253,6 +279,8 @@ def select_spines_widget(spine_meshes: List[Polyhedron_3],
 
     slider = widgets.IntSlider(min=0, max=len(spine_meshes) - 1)
 
+    navigation_buttons = _make_navigation_widget(slider)
+    display(navigation_buttons)
 
     return widgets.interactive(show_spine_by_index, index=slider)
 
@@ -419,6 +447,8 @@ def select_connected_component_widget(binary_image: np.ndarray) ->widgets.Widget
 
     label_index_slider = widgets.IntSlider(min=0, max=len(used_labels) - 1,
                                            continuous_update=False)
+    navigation_buttons = _make_navigation_widget(label_index_slider)
+    display(navigation_buttons)
 
     def show_component(label_index: int) -> np.ndarray:
         lbl = used_labels[label_index]
