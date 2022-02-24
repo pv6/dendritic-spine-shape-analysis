@@ -126,7 +126,7 @@ class HistogramSpineMetric(SpineMetric):
     def show(self):
         out = widgets.Output()
 
-        get_ipython().magic("matplotlib inline")
+        #get_ipython().magic("matplotlib inline")
 
         with out:
             plt.hist(self.distribution, self.num_of_bins, density=True)
