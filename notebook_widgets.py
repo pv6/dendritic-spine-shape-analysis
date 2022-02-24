@@ -289,14 +289,15 @@ def interactive_segmentation(mesh: Polyhedron_3, correspondence,
                              reverse_correspondence,
                              skeleton_graph) -> widgets.Widget:
     vertices, facets = _mesh_to_v_f(mesh)
-    slider = widgets.FloatSlider(min=0.0, max=1.0, step=0.01, value=0.75,
-                                 continuous_update=False)
+
+    slider = widgets.FloatLogSlider(min=-3.0, max=0.0, step=0.01, value=-1.0,
+                                    continuous_update=False)
     plot = mp.plot(vertices, facets)
 
-    def do_segmentation(sensitivity=0.75):
+    def do_segmentation(sensitivity=0.15):
         segmentation = segmentation_by_distance(mesh, correspondence,
                                                 reverse_correspondence,
-                                                skeleton_graph, sensitivity)
+                                                skeleton_graph, 1 - sensitivity)
         plot.update_object(colors=_segmentation_to_colors(vertices, segmentation))
 
         return segmentation
