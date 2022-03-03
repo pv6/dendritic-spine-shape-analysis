@@ -15,6 +15,7 @@ from CGAL.CGAL_Polygon_mesh_processing import Polylines, \
     remove_connected_components, keep_connected_components
 import json
 from scipy.ndimage.filters import median_filter
+from tifffile import imsave
 
 
 Correspondence = Dict[str, Point_3]
@@ -41,7 +42,16 @@ def load_tif(filename: str) -> np.ndarray:
     # stack frames together into ndarray
     result = np.stack(result, -1)
 
+    if result.dtype == "uint16":
+        alpha = 255 / 65535
+        result = result.astype("float") * alpha
+        result = np.round(result).astype("uint8")
+
     return result
+
+
+def save_tif(filename: str, image: np.ndarray) -> None:
+    imsave(filename, np.moveaxis(image, -1, 0))
 
 
 def local_threshold_3d(image: np.ndarray, base_threshold: int = 127,
