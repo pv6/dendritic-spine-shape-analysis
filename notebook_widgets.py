@@ -69,7 +69,14 @@ def show_line_set(lines: List[Tuple[Point_3, Point_3]], mesh) -> None:
     # plot.add_mesh(*_mesh_to_v_f(mesh), shading={"wireframe": True})
 
 
-def _show_image(ax, image, cmap="gray", title=None):
+def _show_image(ax, image, mask=None, mask_opacity=0.5,
+                cmap="gray", title=None):
+    if mask is not None:
+        indices = mask > 0
+        mask = np.stack([np.zeros_like(mask), mask, np.zeros_like(mask)], -1)
+        image = np.stack([image, image, image], -1)
+        image[indices] = image[indices] * (1 - mask_opacity) + mask[indices] * mask_opacity
+
     ax.imshow(image, norm=Normalize(0, 255), cmap=cmap)
 
     if title:
@@ -311,8 +318,10 @@ def show_segmented_mesh(mesh: Polyhedron_3, segmentation: Segmentation):
     mp.plot(vertices, facets, c=colors)
 
 
-def show_sliced_image(image, x, y, z, cmap="gray", title=""):
-    fig, ax = plt.subplots(2, 2, figsize=(15, 5),
+def show_sliced_image(image: np.ndarray, x: int, y: int, z: int,
+                      mask: np.ndarray = None, mask_opacity=0.5,
+                      cmap="gray", title=""):
+    fig, ax = plt.subplots(2, 2, figsize=(15, 15),
                            gridspec_kw={
                                'width_ratios': [image.shape[2],
                                                 image.shape[1]],
@@ -327,10 +336,18 @@ def show_sliced_image(image, x, y, z, cmap="gray", title=""):
     data_y = image[y, :, :].transpose()
     data_z = image[:, :, z]
 
+    mask_x = None
+    mask_y = None
+    mask_z = None
+    if mask is not None:
+        mask_x = mask[:, x, :]
+        mask_y = mask[y, :, :].transpose()
+        mask_z = mask[:, :, z]
+
     ax[0, 0].axis("off")
-    _show_image(ax[1, 0], data_x, title=f"X = {x}", cmap=cmap)
-    _show_image(ax[0, 1], data_y, title=f"Y = {y}", cmap=cmap)
-    _show_image(ax[1, 1], data_z, title=f"Z = {z}", cmap=cmap)
+    _show_image(ax[1, 0], data_x, mask=mask_x, mask_opacity=mask_opacity, title=f"X = {x}", cmap=cmap)
+    _show_image(ax[0, 1], data_y, mask=mask_y, mask_opacity=mask_opacity, title=f"Y = {y}", cmap=cmap)
+    _show_image(ax[1, 1], data_z, mask=mask_z, mask_opacity=mask_opacity, title=f"Z = {z}", cmap=cmap)
 
     _show_cross_planes(ax[1, 0], z, y, data_x.shape, "blue", "green", "red")
     _show_cross_planes(ax[0, 1], x, z, data_y.shape, "red", "blue", "green")
@@ -347,34 +364,28 @@ def show_3d_image(data: np.ndarray, cmap="gray"):
         z=widgets.IntSlider(min=0, max=data.shape[2] - 1, continuous_update=False),
         layout=widgets.Layout(width='500px'))
     def display_slice(x, y, z):
-        show_sliced_image(data, x, y, z, cmap)
+        show_sliced_image(data, x, y, z, cmap=cmap)
 
     return display_slice
 
 
 class Image3DRenderer:
+    image: np.ndarray
+    title: str
+
     _x: int
     _y: int
     _z: int
 
-    _images: List[Tuple[np.ndarray, str]]
-
-    def __init__(self):
+    def __init__(self, image: np.ndarray = np.zeros(0), title: str = "Title"):
         self._x = -1
         self._y = -1
         self._z = -1
-        self._images: List[Tuple[np.ndarray, str]] = []
-
-    @property
-    def images(self) -> List[Tuple[np.ndarray, str]]:
-        return self._images.copy()
-
-    @images.setter
-    def images(self, value: List[Tuple[np.ndarray, str]]) -> None:
-        self._images = value.copy()
+        self.image = image
+        self.title = title
 
     def show(self, cmap="gray"):
-        shape = self._images[0][0].shape
+        shape = self.image.shape
 
         if self._x < 0:
             self._x = shape[1] // 2
@@ -396,10 +407,34 @@ class Image3DRenderer:
             self._x = x
             self._y = y
             self._z = z
-            for i, (image, title) in enumerate(self._images):
-                show_sliced_image(image, x, y, z, cmap=cmap, title=title)
+            self._display_slice(x, y, z, cmap)
 
         return display_slice
+
+    def _display_slice(self, x, y, z, cmap):
+        show_sliced_image(self.image, x, y, z, cmap=cmap, title=self.title)
+
+
+class MaskedImage3DRenderer(Image3DRenderer):
+    mask: np.ndarray
+    _mask_opacity: float
+
+    def __init__(self, image: np.ndarray = np.zeros(0),
+                 mask: np.ndarray = np.zeros(0), title: str = "Title"):
+        super().__init__(image, title)
+        self.mask = mask
+        self._mask_opacity = 1
+
+    def _display_slice(self, x, y, z, cmap):
+        @widgets.interact(mask_opacity=widgets.FloatSlider(min=0, max=1,
+                                                           value=self._mask_opacity,
+                                                           step=0.1,
+                                                           continuous_update=False))
+        def display_slice_with_mask(mask_opacity):
+            self._mask_opacity = mask_opacity
+            show_sliced_image(self.image, x, y, z,
+                              mask=self.mask, mask_opacity=mask_opacity,
+                              cmap=cmap, title=self.title)
 
 
 def interactive_binarization(image: np.ndarray) -> widgets.Widget:
@@ -410,13 +445,13 @@ def interactive_binarization(image: np.ndarray) -> widgets.Widget:
     block_size_slider = widgets.IntSlider(min=1, max=31, value=3, step=2,
                                           continuous_update=False)
 
-    image_renderer = Image3DRenderer()
+    image_renderer = MaskedImage3DRenderer(title="Binarization Result")
 
     def show_binarization(base_threshold: int, weight: int, block_size: int) -> np.ndarray:
         result = local_threshold_3d(image, base_threshold=base_threshold,
                                     weight=weight / 100, block_size=block_size)
-        image_renderer.images = [(image, "Source Image"),
-                                 (result, "Binarization Result")]
+        image_renderer.image = image
+        image_renderer.mask = result
         image_renderer.show()
 
         return result
@@ -444,7 +479,7 @@ def select_connected_component_widget(binary_image: np.ndarray) ->widgets.Widget
         if count >= 10 and unique[i] != 0:
             used_labels.append(unique[i])
 
-    image_renderer = Image3DRenderer()
+    image_renderer = Image3DRenderer(title="Selected Connected Component")
 
     label_index_slider = widgets.IntSlider(min=0, max=len(used_labels) - 1,
                                            continuous_update=False)
@@ -461,7 +496,7 @@ def select_connected_component_widget(binary_image: np.ndarray) ->widgets.Widget
         preview[preview > 0] = 64
         preview[labels == lbl] = 255
 
-        image_renderer.images = [(preview, "Selected Connected Component")]
+        image_renderer.image = preview
         image_renderer.show()
 
         return component
