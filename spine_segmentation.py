@@ -9,8 +9,10 @@ from CGAL.CGAL_Kernel import Point_3
 from CGAL.CGAL_Kernel import Vector_3
 from CGAL.CGAL_Point_set_3 import Point_set_3
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3, Polyhedron_3_Halfedge_handle, \
-    Polyhedron_3_Vertex_handle, Polyhedron_3_Facet_handle, Polyhedron_3_Halfedge_around_facet_circulator
-from CGAL.CGAL_Polygon_mesh_processing import Polylines, remove_connected_components, keep_connected_components
+    Polyhedron_3_Vertex_handle, Polyhedron_3_Facet_handle, \
+    Polyhedron_3_Halfedge_around_facet_circulator
+from CGAL.CGAL_Polygon_mesh_processing import Polylines, \
+    remove_connected_components, keep_connected_components
 import json
 from scipy.ndimage.filters import median_filter
 
@@ -62,13 +64,13 @@ def is_valid_coord(image_shape, coord: Point_3) -> bool:
         0 <= coord.z() < image_shape[2]
 
 
-def get_surface_points(image: np.ndarray) -> Point_set_3:
+def old_get_surface_points(image: np.ndarray) -> Point_set_3:
     # find surface points
     erosion = binary_erosion(image).astype(image.dtype) * 255
     edges = image - erosion
 
     surface_points: np.ndarray = np.argwhere(edges > 0)
-    
+
     # calculate normals
     out: Point_set_3 = Point_set_3()
     out.add_normal_map()
@@ -92,6 +94,33 @@ def get_surface_points(image: np.ndarray) -> Point_set_3:
             normal = Vector_3(0.0, 1.0, 0.0)
         out.insert(point, normal)
 
+    return out
+
+
+def get_surface_points(image: np.ndarray, verbose: bool = False) -> Point_set_3:
+    # image = np.pad(image, 1)
+
+    # find surface points
+    erosion = binary_erosion(image).astype(image.dtype) * 255
+    edges = image - erosion
+
+    surface_points: np.ndarray = np.argwhere(edges > 0)
+
+    # calculate normals
+    out: Point_set_3 = Point_set_3()
+    out.add_normal_map()
+    grad = np.gradient(-image, edge_order=1)
+
+    cnt = 0
+    for i in range(surface_points.shape[0]):
+        if verbose and i / surface_points.shape[0] * 10 > cnt:
+            print(f"{i / surface_points.shape[0] * 100}%")
+            cnt += 1
+        point = list_2_point(surface_points[i])
+        normal = Vector_3(grad[0][surface_points[i, 0], surface_points[i, 1], surface_points[i, 2]],
+                          grad[1][surface_points[i, 0], surface_points[i, 1], surface_points[i, 2]],
+                          grad[2][surface_points[i, 0], surface_points[i, 1], surface_points[i, 2]])
+        out.insert(point, normal)
     return out
 
 
