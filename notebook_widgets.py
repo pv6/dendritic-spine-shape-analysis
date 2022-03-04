@@ -321,7 +321,7 @@ def show_segmented_mesh(mesh: Polyhedron_3, segmentation: Segmentation):
 def show_sliced_image(image: np.ndarray, x: int, y: int, z: int,
                       mask: np.ndarray = None, mask_opacity=0.5,
                       cmap="gray", title=""):
-    fig, ax = plt.subplots(2, 2, figsize=(15, 15),
+    fig, ax = plt.subplots(2, 2, figsize=(12, 10),
                            gridspec_kw={
                                'width_ratios': [image.shape[2],
                                                 image.shape[1]],
