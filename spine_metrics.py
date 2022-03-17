@@ -33,7 +33,7 @@ class SpineMetric(ABC):
             return [self.value]
 
 
-class CustomSpineMetric(SpineMetric):
+class ManualSpineMetric(SpineMetric):
     def __init__(self, name: str, value: Any) -> None:
         super().__init__(Polyhedron_3())
         self.value = value
@@ -44,11 +44,14 @@ class CustomSpineMetric(SpineMetric):
 
 
 def calculate_metrics(spine_mesh: Polyhedron_3,
-                      metric_names: List[str]) -> List[SpineMetric]:
+                      metric_names: List[str], params: List[Dict] = None) -> List[SpineMetric]:
+    if params is None:
+        params = [{}] * len(metric_names)
+
     out = []
-    for name in metric_names:
+    for i, name in enumerate(metric_names):
         klass = globals()[name + "SpineMetric"]
-        out.append(klass(spine_mesh))
+        out.append(klass(spine_mesh, **params[i]))
     return out
 
 

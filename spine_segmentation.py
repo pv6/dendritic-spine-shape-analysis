@@ -5,12 +5,11 @@ import networkx as nx
 import ast
 from PIL import Image
 from scipy.ndimage import binary_erosion
-from CGAL.CGAL_Kernel import Point_3
-from CGAL.CGAL_Kernel import Vector_3
+from CGAL.CGAL_Kernel import Point_3, Vector_3, Point_2
 from CGAL.CGAL_Point_set_3 import Point_set_3
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3, Polyhedron_3_Halfedge_handle, \
     Polyhedron_3_Vertex_handle, Polyhedron_3_Facet_handle, \
-    Polyhedron_3_Halfedge_around_facet_circulator
+    Polyhedron_3_Halfedge_around_facet_circulator, Polyhedron_3_Edge_iterator
 from CGAL.CGAL_Polygon_mesh_processing import Polylines, \
     remove_connected_components, keep_connected_components
 import json
@@ -57,7 +56,8 @@ def save_tif(filename: str, image: np.ndarray) -> None:
 def local_threshold_3d(image: np.ndarray, base_threshold: int = 127,
                        weight: float = 0.05, block_size: int = 3) -> np.ndarray:
     local_median = median_filter(image, size=block_size)
-    threshold = base_threshold + weight * (base_threshold - local_median)
+    # threshold = base_threshold + weight * (base_threshold - local_median)
+    threshold = base_threshold - weight * (base_threshold - local_median)
     output = np.zeros_like(image)
     output[image > threshold] = 255
     # for z in range(image.shape[2]):
@@ -364,7 +364,6 @@ def get_spine_meshes(in_mesh: Polyhedron_3, segmentation: Segmentation) -> List[
             continue
         # fill holes
         for h in spine_mesh.halfedges():
-            a = Polyhedron_3_Halfedge_handle()
             if h.is_border():
                 spine_mesh.fill_hole(h)
         # triangulate non-triangle facets via center vertex
@@ -372,8 +371,6 @@ def get_spine_meshes(in_mesh: Polyhedron_3, segmentation: Segmentation) -> List[
             if not facet.is_triangle():
                 spine_mesh.create_center_vertex(facet.halfedge())
         output.append(spine_mesh)
-
-    print(f"Detected {len(output)} spines")
 
     return output
 
@@ -407,3 +404,18 @@ def spines_to_segmentation(spines: List[Polyhedron_3]) -> Segmentation:
         for point in spine.points():
             result.add(hash_point(point))
     return result
+
+
+def expand_segmentation(segmentation: Segmentation, mesh: Polyhedron_3,
+                        wave_num: int) -> Segmentation:
+    out = segmentation.copy()
+
+    for i in range(wave_num):
+        points_to_add = set()
+        for h in mesh.halfedges():
+            h1 = h.opposite()
+            if hash_point(h1.vertex().point()) in out:
+                points_to_add.add(hash_point(h.vertex().point()))
+        out = out.union(points_to_add)
+
+    return out

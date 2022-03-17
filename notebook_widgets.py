@@ -7,10 +7,10 @@ from CGAL.CGAL_Kernel import Vector_3, Point_3
 from typing import List, Tuple, Dict
 from spine_segmentation import point_2_list, list_2_point, hash_point, \
     Segmentation, segmentation_by_distance, local_threshold_3d,\
-    spines_to_segmentation
+    spines_to_segmentation, expand_segmentation, get_spine_meshes
 import meshplot as mp
 from IPython.display import display
-from spine_metrics import SpineMetric
+from spine_metrics import SpineMetric, calculate_metrics
 from scipy.ndimage.measurements import label
 
 
@@ -40,14 +40,14 @@ def _mesh_to_v_f(mesh: Polyhedron_3) -> Tuple[np.ndarray, np.ndarray]:
             facets[i, j] = (v.id())
             j += 1
             # check for end of loop
-            if circulator == begin:
+            if circulator == begin or j == 3:
                 break
     return vertices, facets
 
 
 def show_3d_mesh(mesh: Polyhedron_3) -> None:
     vertices, facets = _mesh_to_v_f(mesh)
-    mp.plot(vertices, facets)
+    mp.plot(vertices, facets, shading={"wireframe": True})
 
 
 def show_line_set(lines: List[Tuple[Point_3, Point_3]], mesh) -> None:
@@ -65,8 +65,8 @@ def show_line_set(lines: List[Tuple[Point_3, Point_3]], mesh) -> None:
     # render
     plot = mp.plot(vertices, facets, shading={"wireframe": True})
     v, f = _mesh_to_v_f(mesh)
-    plot.add_lines(v[f[:, 0]], v[f[:, 1]], shading={"line_color": "gray"})
-    # plot.add_mesh(*_mesh_to_v_f(mesh), shading={"wireframe": True})
+    # plot.add_lines(v[f[:, 0]], v[f[:, 1]], shading={"line_color": "gray"})
+    plot.add_mesh(*_mesh_to_v_f(mesh), shading={"wireframe": True})
 
 
 def _show_image(ax, image, mask=None, mask_opacity=0.5,
@@ -121,76 +121,72 @@ class SpinePreview:
     widget: widgets.Widget
     spine_viewer: mp.Viewer
     dendrite_viewer: mp.Viewer
-    is_selected_checkbox: widgets.Checkbox
-    is_selected: bool
 
-    _selected_spine_colors: np.ndarray
-    _unselected_spine_colors: np.ndarray
+    spine_mesh: Polyhedron_3
+    metrics: List[SpineMetric]
 
-    _selected_dendrite_colors: np.ndarray
-    _unselected_dendrite_colors: np.ndarray
+    _spine_colors: np.ndarray
 
-    _spine_mesh: Polyhedron_3
+    _dendrite_colors: np.ndarray
+
     _spine_v_f: Tuple[np.ndarray, np.ndarray]
     _dendrite_v_f: Tuple[np.ndarray, np.ndarray]
-    _metrics: List[SpineMetric]
+
+    _metrics_box: widgets.VBox
+
+    _spine_mesh_id: int
 
     def __init__(self, spine_mesh: Polyhedron_3,
                  dendrite_v_f: Tuple[np.ndarray, np.ndarray],
                  metrics: List[SpineMetric]) -> None:
-        self._spine_mesh = spine_mesh
-        self._spine_v_f = _mesh_to_v_f(self._spine_mesh)
+        self._spine_mesh_id = 0
         self._dendrite_v_f = dendrite_v_f
-        self._metrics = metrics
-        self.is_selected = True
-        
-        self._make_colors()
-        self._make_is_selected()
+        self._set_spine_mesh(spine_mesh, metrics)
         self.create_views()
 
     def create_views(self) -> None:
         preview_panel = widgets.HBox(children=[self._make_dendrite_view(),
                                                self._make_spine_panel()],
                                      layout=widgets.Layout(align_items="flex-start"))
-        self.widget = widgets.VBox([self.is_selected_checkbox, preview_panel])
+        self.widget = preview_panel
 
-    def _make_is_selected(self) -> None:
-        is_selected_checkbox = widgets.Checkbox(value=self.is_selected, description="Valid spine")
+    def _set_spine_mesh(self, spine_mesh: Polyhedron_3, metrics: List[SpineMetric]) -> None:
+        self.spine_mesh = spine_mesh
+        self._spine_v_f = _mesh_to_v_f(self.spine_mesh)
 
-        def update_is_selected(change: Dict) -> None:
-            if change["name"] == "value":
-                self.set_selected(change["new"])
-        is_selected_checkbox.observe(update_is_selected)
+        self._make_colors()
 
-        self.is_selected_checkbox = is_selected_checkbox
+        if hasattr(self, "spine_viewer"):
+            # self.spine_viewer.update_object(vertices=self._spine_v_f[0],
+            #                                 faces=self._spine_v_f[1],
+            #                                 colors=self._get_spine_colors())
+            # self.spine_viewer.update_object(colors=self._get_spine_colors())
+            self.spine_viewer.remove_object(self._spine_mesh_id)
+            self._spine_mesh_id += 1
+            self.spine_viewer.add_mesh(*self._spine_v_f, self._get_spine_colors())
+        if hasattr(self, "dendrite_viewer"):
+            self.dendrite_viewer.update_object(colors=self._get_dendrite_colors())
 
+        self.metrics = metrics
+        if hasattr(self, "_metrics_box"):
+            self._fill_metrics_box()
+        
     def _make_colors(self) -> None:
         # dendrite view colors
-        self._selected_dendrite_colors = np.ndarray((len(self._dendrite_v_f[0]), 3))
-        self._selected_dendrite_colors[:] = \
+        self._dendrite_colors = np.ndarray((len(self._dendrite_v_f[0]), 3))
+        self._dendrite_colors[:] = \
             _segmentation_to_colors(self._dendrite_v_f[0],
-                                    spines_to_segmentation([self._spine_mesh]),
+                                    spines_to_segmentation([self.spine_mesh]),
                                     GREEN, RED)
-        self._unselected_dendrite_colors = np.ndarray((len(self._dendrite_v_f[0]), 3))
-        self._unselected_dendrite_colors[:] = \
-            _segmentation_to_colors(self._dendrite_v_f[0],
-                                    spines_to_segmentation([self._spine_mesh]),
-                                    GRAY, DARK_GRAY)
         # spine view colors
-        self._selected_spine_colors = np.ndarray((self._spine_mesh.size_of_vertices(), 3))
-        self._selected_spine_colors[:] = YELLOW
-        self._unselected_spine_colors = np.ndarray((self._spine_mesh.size_of_vertices(), 3))
-        self._unselected_spine_colors[:] = GRAY
+        self._spine_colors = np.ndarray((self.spine_mesh.size_of_vertices(), 3))
+        self._spine_colors[:] = YELLOW
 
     def _get_dendrite_colors(self):
-        if self.is_selected:
-            return self._selected_dendrite_colors
-        return self._unselected_dendrite_colors
+        return self._dendrite_colors
 
     def _get_spine_colors(self):
-        if self.is_selected:
-            return self._selected_spine_colors
-        return self._unselected_spine_colors
+        return self._spine_colors
 
     def _make_dendrite_view(self) -> widgets.Widget:
         # make mesh viewer
@@ -218,15 +214,18 @@ class SpinePreview:
 
         return widgets.VBox(children=[title, self.spine_viewer._renderer])
 
+    def _fill_metrics_box(self) -> None:
+        self._metrics_box.children = [widgets.VBox([widgets.Label(metric.name),
+                                                    metric.show()],
+                                                   layout=widgets.Layout(border="solid 1px"))
+                                      for metric in self.metrics]
+
     def _make_metrics_panel(self) -> widgets.Widget:
         # TODO: figure out scrolling
-        metrics_box = widgets.VBox([widgets.VBox([widgets.Label(metric.name),
-                                                  metric.show()],
-                                                 layout=widgets.Layout(border="solid 1px"))
-                                    for metric in self._metrics],
-                                   layout=widgets.Layout())
+        self._metrics_box = widgets.VBox([], layout=widgets.Layout())
+        self._fill_metrics_box()
 
-        return widgets.VBox(children=[widgets.Label("Metrics"), metrics_box])
+        return widgets.VBox(children=[widgets.Label("Metrics"), self._metrics_box])
 
     def _make_spine_panel(self) -> widgets.Widget:
         # convert spine mesh to meshplot format
@@ -234,9 +233,100 @@ class SpinePreview:
                                       self._make_metrics_panel()],
                             layout=widgets.Layout(align_items="flex-start"))
 
+
+class SelectableSpinePreview(SpinePreview):
+    is_selected_checkbox: widgets.Checkbox
+    is_selected: bool
+
+    _unselected_spine_colors: np.ndarray
+    _unselected_dendrite_colors: np.ndarray
+
+    metrics: List[SpineMetric]
+    _metric_names: List[str]
+    _metric_params: List[Dict]
+
+    _correction_slider: widgets.IntSlider
+
+    _dendrite_mesh: Polyhedron_3
+
+    _initial_segmentation: Segmentation
+
+    def __init__(self, spine_mesh: Polyhedron_3,
+                 dendrite_v_f: Tuple[np.ndarray, np.ndarray],
+                 dendrite_mesh: Polyhedron_3,
+                 metric_names: List[str],
+                 metric_params: List[Dict] = None) -> None:
+        self._initial_segmentation = spines_to_segmentation([spine_mesh])
+        self.is_selected = True
+        self._make_is_selected()
+        self._dendrite_mesh = dendrite_mesh
+        self._make_correction_slider()
+        self._metric_names = metric_names
+        self._metric_params = metric_params
+        self._metrics = calculate_metrics(spine_mesh, self._metric_names,
+                                          self._metric_params)
+        super().__init__(spine_mesh, dendrite_v_f, self._metrics)
+
+    def create_views(self) -> None:
+        super().create_views()
+        self.widget = widgets.VBox([self.is_selected_checkbox,
+                                    self._correction_slider,
+                                    self.widget])
+
+    def _make_correction_slider(self) -> None:
+        def observe_correction(change: Dict) -> None:
+            if change["name"] == "value":
+                self._correct_spine(change["new"])
+        self._correction_slider = widgets.IntSlider(min=0, max=6, value=0,
+                                                    continuous_update=False,
+                                                    description="Correction")
+        self._correction_slider.observe(observe_correction)
+
+    def _correct_spine(self, correction_value: int) -> None:
+        new_segm = expand_segmentation(self._initial_segmentation,
+                                       self._dendrite_mesh, correction_value)
+        meshes = get_spine_meshes(self._dendrite_mesh, new_segm)
+        if len(meshes) != 1:
+            print(f"OOPSIE DAISY: {len(meshes)}")
+        self._set_spine_mesh(meshes[0], calculate_metrics(meshes[0],
+                                                          self._metric_names,
+                                                          self._metric_params))
+
+    def _make_is_selected(self) -> None:
+        def update_is_selected(change: Dict) -> None:
+            if change["name"] == "value":
+                self.set_selected(change["new"])
+        self.is_selected_checkbox = widgets.Checkbox(value=self.is_selected,
+                                                     description="Valid spine")
+        self.is_selected_checkbox.observe(update_is_selected)
+
+    def _make_colors(self) -> None:
+        super()._make_colors()
+        # dendrite view colors
+        self._unselected_dendrite_colors = np.ndarray(
+            (len(self._dendrite_v_f[0]), 3))
+        self._unselected_dendrite_colors[:] = \
+            _segmentation_to_colors(self._dendrite_v_f[0],
+                                    spines_to_segmentation([self.spine_mesh]),
+                                    GRAY, DARK_GRAY)
+        # spine view colors
+        self._unselected_spine_colors = np.ndarray(
+            (self.spine_mesh.size_of_vertices(), 3))
+        self._unselected_spine_colors[:] = GRAY
+
+    def _get_dendrite_colors(self):
+        if self.is_selected:
+            return self._dendrite_colors
+        return self._unselected_dendrite_colors
+
+    def _get_spine_colors(self):
+        if self.is_selected:
+            return self._spine_colors
+        return self._unselected_spine_colors
+
     def set_selected(self, value: bool) -> None:
         self.is_selected = value
-        self.spine_viewer.update_object(colors=self._get_spine_colors())
+        self.spine_viewer.update_object(self._spine_mesh_id, colors=self._get_spine_colors())
         self.dendrite_viewer.update_object(colors=self._get_dendrite_colors())
 
 
@@ -268,12 +358,13 @@ def _make_navigation_widget(slider: widgets.IntSlider) -> widgets.Widget:
 
 def select_spines_widget(spine_meshes: List[Polyhedron_3],
                          dendrite_mesh: Polyhedron_3,
-                         metrics: List[List[SpineMetric]]) -> widgets.Widget:
-
+                         metric_names: List[str],
+                         metric_params: List[Dict] = None) -> widgets.Widget:
     dendrite_v_f: Tuple = _mesh_to_v_f(dendrite_mesh)
-    spine_previews = [SpinePreview(spine_mesh,
-                                   dendrite_v_f, metrics[i])
-                      for i, spine_mesh in enumerate(spine_meshes)]
+    spine_previews = [SelectableSpinePreview(spine_mesh, dendrite_v_f,
+                                             dendrite_mesh, metric_names,
+                                             metric_params)
+                      for spine_mesh in spine_meshes]
 
     def show_spine_by_index(index: int):
         # keeping old views caused bugs when switching between spines
@@ -281,15 +372,16 @@ def select_spines_widget(spine_meshes: List[Polyhedron_3],
         spine_previews[index].create_views()
         display(spine_previews[index].widget)
 
-        # return indices of selected spines
-        return [i for i, preview in enumerate(spine_previews) if preview.is_selected]
+        # selected spine meshes and metrics
+        return [(preview.spine_mesh, preview.metrics)
+                for preview in spine_previews if preview.is_selected]
 
     slider = widgets.IntSlider(min=0, max=len(spine_meshes) - 1)
-
     navigation_buttons = _make_navigation_widget(slider)
-    display(navigation_buttons)
 
-    return widgets.interactive(show_spine_by_index, index=slider)
+    return widgets.VBox([navigation_buttons,
+                         widgets.interactive(show_spine_by_index,
+                                             index=slider)])
 
 
 def interactive_segmentation(mesh: Polyhedron_3, correspondence,
