@@ -9,9 +9,32 @@ from CGAL.CGAL_Polyhedron_3 import Polyhedron_3, Polyhedron_3_Facet_handle, \
 from CGAL.CGAL_Polygon_mesh_processing import area, face_area, volume
 from CGAL.CGAL_Kernel import Ray_3, Point_3, Vector_3
 from CGAL.CGAL_AABB_tree import AABB_tree_Polyhedron_3_Facet_handle
-from spine_segmentation import point_2_list
 from matplotlib import pyplot as plt
 import csv
+from CGAL.CGAL_Convex_hull_3 import convex_hull_3
+
+
+def _calculate_facet_center(facet: Polyhedron_3_Facet_handle) -> Vector_3:
+    circulator = facet.facet_begin()
+    begin = facet.facet_begin()
+    center = Vector_3(0, 0, 0)
+    while circulator.hasNext():
+        halfedge = circulator.next()
+        pnt = halfedge.vertex().point()
+        center += Vector_3(pnt.x(), pnt.y(), pnt.z())
+        # check for end of loop
+        if circulator == begin:
+            break
+    center /= 3
+    return center
+
+
+def _vec_2_point(vector: Vector_3) -> Point_3:
+    return Point_3(vector.x(), vector.y(), vector.z())
+
+
+def _point_2_vec(point: Point_3) -> Vector_3:
+    return Vector_3(point.x(), point.y(), point.z())
 
 
 class SpineMetric(ABC):
@@ -87,7 +110,7 @@ def load_metrics(filename: str) -> Dict[str, List[SpineMetric]]:
             metrics = []
             for metric_name in row.keys():
                 value_str = row[metric_name]
-                value = None
+                value: Any
                 if value_str[0] == "[":
                     value = np.fromstring(value_str[1:-1], dtype="float", sep=" ")
                 else:
@@ -120,6 +143,121 @@ class VolumeSpineMetric(FloatSpineMetric):
         return volume(spine_mesh)
 
 
+class ConvexHullVolumeSpineMetric(FloatSpineMetric):
+    def __init__(self, spine_mesh: Polyhedron_3) -> None:
+        self.name = "Convex Hull Volume"
+        super().__init__(spine_mesh)
+
+    def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
+        hull_mesh = Polyhedron_3()
+        convex_hull_3(spine_mesh.points(), hull_mesh)
+        return volume(hull_mesh)
+
+
+class ConvexHullRatioSpineMetric(FloatSpineMetric):
+    def __init__(self, spine_mesh: Polyhedron_3) -> None:
+        self.name = "Convex Hull Ratio"
+        super().__init__(spine_mesh)
+
+    def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
+        hull_mesh = Polyhedron_3()
+        convex_hull_3(spine_mesh.points(), hull_mesh)
+        v = volume(spine_mesh)
+        return (volume(hull_mesh) - v) / v
+
+
+class JunctionSpineMetric(FloatSpineMetric, ABC):
+    _junction_center: Vector_3
+    _surface_vectors: List[Vector_3]
+
+    @abstractmethod
+    def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
+        # calculate junction center
+        self._junction_center = Vector_3(0, 0, 0)
+        i = 0
+        for facet in spine_mesh.facets():
+            if facet.id() == 0:
+                self._junction_center += _calculate_facet_center(facet)
+                i += 1
+        if i > 0:
+            self._junction_center /= i
+        else:
+            self._junction_center = _point_2_vec(spine_mesh.points().next())
+
+        # calculate vectors to surface
+        self._surface_vectors = []
+        for point in spine_mesh.points():
+            self._surface_vectors.append(_point_2_vec(point) - self._junction_center)
+
+
+class JunctionDistanceSpineMetric(JunctionSpineMetric, ABC):
+    _distances: List[float]
+
+    @abstractmethod
+    def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
+        super()._calculate(spine_mesh)
+
+        self._distances = []
+        for v in self._surface_vectors:
+            self._distances.append(np.sqrt(v.squared_length()))
+
+
+class AverageDistanceSpineMetric(JunctionDistanceSpineMetric):
+    def __init__(self, spine_mesh: Polyhedron_3) -> None:
+        self.name = "Average Distance"
+        super().__init__(spine_mesh)
+
+    def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
+        super()._calculate(spine_mesh)
+        return np.mean(self._distances)
+
+
+class LengthSpineMetric(JunctionDistanceSpineMetric):
+    def __init__(self, spine_mesh: Polyhedron_3) -> None:
+        self.name = "Length"
+        super().__init__(spine_mesh)
+
+    def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
+        super()._calculate(spine_mesh)
+        return np.mean(self._distances[self._distances > np.quantile(self._distances, 0.95)])
+
+
+class CVDSpineMetric(JunctionDistanceSpineMetric):
+    def __init__(self, spine_mesh: Polyhedron_3) -> None:
+        self.name = "Coefficient of variation in distance"
+        super().__init__(spine_mesh)
+
+    def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
+        super()._calculate(spine_mesh)
+        return np.std(self._distances, ddof=1) / np.mean(self._distances)
+
+
+class OpenAngleSpineMetric(JunctionSpineMetric):
+    def __init__(self, spine_mesh: Polyhedron_3) -> None:
+        self.name = "Open Angle"
+        super().__init__(spine_mesh)
+
+    def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
+        super()._calculate(spine_mesh)
+
+        axis = np.mean(self._surface_vectors)
+        angle_sum = 0
+        for v in self._surface_vectors:
+            angle_sum += 
+
+        return angle_sum / len(self._surface_vectors)
+
+
+class OpenAngle(AverageDistanceSpineMetric):
+    def __init__(self, spine_mesh: Polyhedron_3) -> None:
+        self.name = "Coefficient of variation in distance"
+        super().__init__(spine_mesh)
+
+    def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
+        super()._calculate(spine_mesh)
+        return np.std(self._distances, ddof=1) / np.mean(self._distances)
+
+
 class HistogramSpineMetric(SpineMetric):
     num_of_bins: int
     distribution: np.array
@@ -131,7 +269,7 @@ class HistogramSpineMetric(SpineMetric):
     def show(self):
         out = widgets.Output()
 
-        #get_ipython().magic("matplotlib inline")
+        # get_ipython().magic("matplotlib inline")
 
         with out:
             plt.hist(self.distribution, self.num_of_bins, density=True)
@@ -170,21 +308,6 @@ class ChordDistributionSpineMetric(HistogramSpineMetric):
         return [facet_halfedge, facet_halfedge.next(), facet_halfedge.next().next()]
 
     @staticmethod
-    def _calculate_facet_center(facet: Polyhedron_3_Facet_handle) -> Vector_3:
-        circulator = facet.facet_begin()
-        begin = facet.facet_begin()
-        center = Vector_3(0, 0, 0)
-        while circulator.hasNext():
-            halfedge = circulator.next()
-            pnt = halfedge.vertex().point()
-            center += Vector_3(pnt.x(), pnt.y(), pnt.z())
-            # check for end of loop
-            if circulator == begin:
-                break
-        center /= 3
-        return center
-
-    @staticmethod
     def _is_triangle(facet: Polyhedron_3_Facet_handle) -> bool:
         circulator = facet.facet_begin()
         begin = facet.facet_begin()
@@ -196,18 +319,9 @@ class ChordDistributionSpineMetric(HistogramSpineMetric):
                 break
         return i == 3
 
-    @staticmethod
-    def _vec_2_point(vector: Vector_3) -> Point_3:
-        return Point_3(vector.x(), vector.y(), vector.z())
-
-    @staticmethod
-    def _point_2_vec(point: Point_3) -> Vector_3:
-        return Vector_3(point.x(), point.y(), point.z())
-
     def _subdivide_mesh(self, mesh: Polyhedron_3,
                         relative_max_facet_area: float = 0.001) -> Polyhedron_3:
         out: Polyhedron_3 = mesh.deepcopy()
-        total_area = area(out)
         subdivision_number = 3
 
         for i in range(subdivision_number):
@@ -217,10 +331,10 @@ class ChordDistributionSpineMetric(HistogramSpineMetric):
             for edge in edges:
                 first_half: Polyhedron_3_Halfedge_handle = out.split_edge(edge)
                 center_vertices.add(first_half.vertex())
-                a = self._point_2_vec(first_half.vertex().point())
-                b = self._point_2_vec(edge.vertex().point())
+                a = _point_2_vec(first_half.vertex().point())
+                b = _point_2_vec(edge.vertex().point())
                 center = (a + b) / 2
-                first_half.vertex().set_point(self._vec_2_point(center))
+                first_half.vertex().set_point(_vec_2_point(center))
             # create center triangles
             facets = [facet for facet in out.facets()]
             for j, facet in enumerate(facets):
@@ -240,10 +354,10 @@ class ChordDistributionSpineMetric(HistogramSpineMetric):
         intersections = []
         tree.all_intersections(ray_query, intersections)
 
-        origin = self._point_2_vec(ray_query.source())
+        origin = _point_2_vec(ray_query.source())
 
         # sort intersections along the ray
-        intersection_points = [self._calculate_facet_center(intersection.second)
+        intersection_points = [_calculate_facet_center(intersection.second)
                                for intersection in intersections]
         intersection_points.sort(key=lambda point: (point - origin).squared_length())
 
@@ -282,19 +396,17 @@ class ChordDistributionSpineMetric(HistogramSpineMetric):
             self.chord_lengths.append(length)
 
             self.chords.append(
-                (self._vec_2_point(center_1), self._vec_2_point(center_2)))
+                (_vec_2_point(center_1), _vec_2_point(center_2)))
 
     def _calculate_distribution(self, spine_mesh: Polyhedron_3) -> np.array:
         self.chord_lengths = []
         self.chords = []
 
-        for i, facet in enumerate(spine_mesh.facets()):
-            facet.set_id(i)
         subdivided_spine_mesh = self._subdivide_mesh(spine_mesh, self.relative_max_facet_area)
 
         tree = AABB_tree_Polyhedron_3_Facet_handle(subdivided_spine_mesh.facets())
 
-        facets = [[] for i in range(spine_mesh.size_of_facets())]
+        facets = [[]] * spine_mesh.size_of_facets()
         for facet in subdivided_spine_mesh.facets():
             facets[facet.id()].append(facet)
 
@@ -308,13 +420,13 @@ class ChordDistributionSpineMetric(HistogramSpineMetric):
                 ind2 = rand.randrange(0, len(facets))
             f1 = facets[ind1][rand.randrange(0, len(facets[ind1]))]
             f2 = facets[ind2][rand.randrange(0, len(facets[ind2]))]
-            p1 = self._calculate_facet_center(f1)
-            p2 = self._calculate_facet_center(f2)
+            p1 = _calculate_facet_center(f1)
+            p2 = _calculate_facet_center(f2)
             direction = p2 - p1
             direction.normalize()
 
-            ray_query = Ray_3(self._vec_2_point(p1 - direction * 5000),
-                              self._vec_2_point(p2 + direction * 5000))
+            ray_query = Ray_3(_vec_2_point(p1 - direction * 5000),
+                              _vec_2_point(p2 + direction * 5000))
             self._calculate_raycast(ray_query, tree)
 
         # # find bounding box
@@ -358,6 +470,9 @@ class OldChordDistributionSpineMetric(ChordDistributionSpineMetric):
     def _subdivide_mesh(self, mesh: Polyhedron_3,
                         relative_max_facet_area: float = 0.001) -> Polyhedron_3:
         out: Polyhedron_3 = mesh.deepcopy()
+        for i, facet in enumerate(out.facets()):
+            facet.set_id(i)
+
         facets = [facet for facet in out.facets()]
         total_area = area(out)
 
@@ -375,7 +490,7 @@ class OldChordDistributionSpineMetric(ChordDistributionSpineMetric):
                 new_triangles = []
                 for halfedge in triangles:
                     new_triangles.extend(self._get_incident_halfedges(halfedge))
-                    center = self._vec_2_point(self._calculate_facet_center(halfedge.facet()))
+                    center = _vec_2_point(_calculate_facet_center(halfedge.facet()))
                     new_v = out.create_center_vertex(halfedge).vertex()
                     new_v.set_point(center)
                 triangles = new_triangles

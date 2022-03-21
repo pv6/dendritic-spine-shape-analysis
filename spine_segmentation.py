@@ -366,6 +366,7 @@ def get_spine_meshes(in_mesh: Polyhedron_3, segmentation: Segmentation) -> List[
         for h in spine_mesh.halfedges():
             if h.is_border():
                 spine_mesh.fill_hole(h)
+                h.facet().set_id(0)
         # triangulate non-triangle facets via center vertex
         for facet in spine_mesh.facets():
             if not facet.is_triangle():
