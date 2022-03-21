@@ -12,6 +12,7 @@ import meshplot as mp
 from IPython.display import display
 from spine_metrics import SpineMetric, calculate_metrics
 from scipy.ndimage.measurements import label
+from spine_clusterization import SpineClusterizer
 
 
 RED = (1, 0, 0)
@@ -594,3 +595,36 @@ def select_connected_component_widget(binary_image: np.ndarray) ->widgets.Widget
         return component
 
     return widgets.interactive(show_component, label_index=label_index_slider)
+
+
+def clusterization_widget(clusterizer: SpineClusterizer,
+                          spine_meshes: List[Polyhedron_3],
+                          dendrite_mesh: Polyhedron_3,
+                          metrics: List[List[SpineMetric]]) -> widgets.Widget:
+    dendrite_v_f: Tuple = _mesh_to_v_f(dendrite_mesh)
+
+    spine_previews_by_cluster = []
+    for cluster_mask in clusterizer.cluster_masks:
+        spine_previews_by_cluster.append([])
+        for i, value in enumerate(cluster_mask):
+            if value:
+                spine_previews_by_cluster[-1].append(
+                    SpinePreview(spine_meshes[i], dendrite_v_f, metrics[i]))
+
+    def show_spine_by_cluster(cluster_index: int):
+        def show_spine_by_index(index: int):
+            # keeping old views caused bugs when switching between spines
+            # this sacrifices saving camera position but oh well
+            spine_previews_by_cluster[cluster_index][index].create_views()
+            display(spine_previews_by_cluster[cluster_index][index].widget)
+        slider = widgets.IntSlider(min=0, max=len(spine_previews_by_cluster[cluster_index]) - 1)
+        navigation_buttons = _make_navigation_widget(slider)
+        display(widgets.VBox([navigation_buttons,
+                              widgets.interactive(show_spine_by_index,
+                                                  index=slider)]))
+
+    cluster_slider = widgets.IntSlider(min=0, max=len(spine_previews_by_cluster) - 1)
+    cluster_navigation_buttons = _make_navigation_widget(cluster_slider)
+    return widgets.VBox([cluster_navigation_buttons,
+                         widgets.interactive(show_spine_by_cluster,
+                                             cluster_index=cluster_slider)])
