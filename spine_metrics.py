@@ -7,7 +7,7 @@ import ipywidgets as widgets
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3, Polyhedron_3_Facet_handle, \
     Polyhedron_3_Halfedge_handle, Polyhedron_3_Vertex_handle, Polyhedron_3_Edge_iterator
 from CGAL.CGAL_Polygon_mesh_processing import area, face_area, volume
-from CGAL.CGAL_Kernel import Ray_3, Point_3, Vector_3
+from CGAL.CGAL_Kernel import Ray_3, Point_3, Vector_3, cross_product
 from CGAL.CGAL_AABB_tree import AABB_tree_Polyhedron_3_Facet_handle
 from matplotlib import pyplot as plt
 import csv
@@ -243,7 +243,7 @@ class OpenAngleSpineMetric(JunctionSpineMetric):
         axis = np.mean(self._surface_vectors)
         angle_sum = 0
         for v in self._surface_vectors:
-            angle_sum += 
+            angle_sum += math.atan2(np.sqrt(cross_product(axis, v).squared_length()), axis * v)
 
         return angle_sum / len(self._surface_vectors)
 
