@@ -12,7 +12,7 @@ import meshplot as mp
 from IPython.display import display
 from spine_metrics import SpineMetric, SpineMetricDataset, calculate_metrics
 from scipy.ndimage.measurements import label
-from spine_clusterization import SpineClusterizer, KMeansSpineClusterizer
+from spine_clusterization import SpineClusterizer, KMeansSpineClusterizer, DBSCANSpineClusterizer
 
 
 RED = (1, 0, 0)
@@ -332,7 +332,7 @@ class SelectableSpinePreview(SpinePreview):
         self.dendrite_viewer.update_object(colors=self._get_dendrite_colors())
 
 
-def _make_navigation_widget(slider: widgets.IntSlider) -> widgets.Widget:
+def _make_navigation_widget(slider: widgets.IntSlider, step=1) -> widgets.Widget:
     next_button = widgets.Button(description=">")
     prev_button = widgets.Button(description="<")
 
@@ -344,11 +344,11 @@ def _make_navigation_widget(slider: widgets.IntSlider) -> widgets.Widget:
     slider.observe(disable_buttons)
 
     def next_callback(button: widgets.Button) -> None:
-        slider.value += 1
+        slider.value += step
         disable_buttons()
 
     def prev_callback(button: widgets.Button) -> None:
-        slider.value -= 1
+        slider.value -= step
         disable_buttons()
 
     next_button.on_click(next_callback)
@@ -675,22 +675,28 @@ def new_clusterization_widget(clusterizer: SpineClusterizer,
                                              cluster_index=cluster_slider)])
 
 
-def k_means_clustering_experiment(spine_metrics: SpineMetricDataset,
-                                  spine_meshes: Dict[str, Polyhedron_3],
-                                  min_clusters: int = 2,
-                                  max_clusters: int = 30) -> widgets.Widget:
+def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
+                                 spine_meshes: Dict[str, Polyhedron_3],
+                                 clusterizer_type,
+                                 param_slider_type, param_name,
+                                 param_min_value, param_max_value,
+                                 param_start_value, param_step) -> widgets.Widget:
     # calculate score graph
     scores = []
-    for i in range(min_clusters, max_clusters + 1):
-        clusterizer = KMeansSpineClusterizer(num_of_clusters=i)
+    num_of_steps = int(np.ceil((param_max_value - param_min_value) / param_step))
+    param_values = [np.clip(param_min_value + param_step * i,
+                    param_min_value, param_max_value) for i in range(num_of_steps)]
+    for value in param_values:
+        clusterizer = clusterizer_type(**{param_name: value})
         clusterizer.fit(spine_metrics)
         scores.append(clusterizer.score())
 
-    num_of_clusters_slider = widgets.IntSlider(min=min_clusters, max=max_clusters,
-                                               continuous_update=False)
+    param_slider = param_slider_type(min=param_min_value, max=param_max_value,
+                                     value=param_start_value, step=param_step,
+                                     continuous_update=False)
 
-    def show_clusterization(num_of_clusters: int = 2) -> None:
-        clusterizer = KMeansSpineClusterizer(num_of_clusters)
+    def show_clusterization(param_value) -> None:
+        clusterizer = clusterizer_type(**{param_name: param_value})
         clusterizer.fit(spine_metrics)
         # a = widgets.VBox([clusterizer.show(),
         #                   new_clusterization_widget(clusterizer, spine_meshes)])
@@ -698,11 +704,11 @@ def k_means_clustering_experiment(spine_metrics: SpineMetricDataset,
 
         score_graph = widgets.Output()
         with score_graph:
-            plt.axvline(x=num_of_clusters, color='g', linestyle='-')
+            plt.axvline(x=param_value, color='g', linestyle='-')
             plt.axhline(y=0, color='r', linestyle='-')
-            plt.plot(range(min_clusters, max_clusters + 1), scores)
-            plt.title("k-means")
-            plt.xlabel("Number of clusters")
+            plt.plot(param_values, scores)
+            plt.title(clusterizer_type.__name__)
+            plt.xlabel(param_name)
             plt.ylabel("Silhouette score")
             plt.ylim([-1, 1])
             plt.show()
@@ -711,8 +717,31 @@ def k_means_clustering_experiment(spine_metrics: SpineMetricDataset,
         display(b)
 
     clusterization_result = widgets.interactive(show_clusterization,
-                                                num_of_clusters=num_of_clusters_slider)
+                                                param_value=param_slider)
 
-    navigation_buttons = _make_navigation_widget(num_of_clusters_slider)
+    navigation_buttons = _make_navigation_widget(param_slider, param_step)
 
     return widgets.VBox([navigation_buttons, clusterization_result])
+
+
+def k_means_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
+                                         spine_meshes: Dict[str, Polyhedron_3],
+                                         min_num_of_clusters: int = 2,
+                                         max_num_of_clusters: int = 20) -> widgets.Widget:
+    return clustering_experiment_widget(spine_metrics, spine_meshes,
+                                        KMeansSpineClusterizer,
+                                        widgets.IntSlider, "num_of_clusters",
+                                        min_num_of_clusters, max_num_of_clusters,
+                                        min_num_of_clusters, 1)
+
+
+def dbscan_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
+                                        spine_meshes: Dict[str, Polyhedron_3],
+                                        min_eps: float = 2,
+                                        max_eps: float = 20,
+                                        eps_step: float = 0.1) -> widgets.Widget:
+    return clustering_experiment_widget(spine_metrics, spine_meshes,
+                                        DBSCANSpineClusterizer,
+                                        widgets.FloatSlider, "eps",
+                                        min_eps, max_eps,
+                                        min_eps, eps_step)

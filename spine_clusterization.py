@@ -191,7 +191,7 @@ class DBSCANSpineClusterizer(SKLearnSpineClusterizer):
                     markeredgecolor="k",
                     markersize=6,
                 )
-        plt.title(f"Estimated number of clusters: {self.num_of_clusters}, eps: {self.eps}")
+        plt.title(f"Number of clusters: {self.num_of_clusters}, score: {self.score():.3f}")
 
 
 class KMeansSpineClusterizer(SKLearnSpineClusterizer):
