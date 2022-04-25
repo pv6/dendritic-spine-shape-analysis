@@ -4,6 +4,7 @@ from ipywidgets import widgets
 from matplotlib import pyplot as plt
 from sklearn.cluster import DBSCAN, KMeans
 from sklearn.metrics import silhouette_score
+from scipy.spatial.distance import euclidean
 import numpy as np
 from sklearn.decomposition import PCA
 from abc import ABC, abstractmethod
@@ -15,11 +16,13 @@ class SpineClusterizer(ABC):
     num_of_clusters: int
     sample_size: int
     reduced_data: np.ndarray
+    use_pca: bool
     _data: np.ndarray
 
-    def __init__(self):
+    def __init__(self, use_pca: bool = False):
         self.cluster_masks = []
         self.num_of_clusters = 0
+        self.use_pca = use_pca
 
     def get_cluster(self, index: int) -> List[int]:
         return [i for i, x in enumerate(self.cluster_masks[index]) if x]
@@ -50,6 +53,8 @@ class SpineClusterizer(ABC):
         self._data = np.asarray(data)
         pca = PCA(2)
         self.reduced_data = pca.fit_transform(self._data)
+        if self.use_pca:
+            self._data = self.reduced_data
         self._fit(self._data)
 
     def score(self, metric: Union[str, Callable] = "euclidean") -> float:
@@ -86,12 +91,32 @@ class SpineClusterizer(ABC):
                     markerfacecolor=tuple(color),
                     markeredgecolor="k",
                     markersize=14,
+                    label=f"{i}"
                 )
         plt.title(f"Number of clusters: {self.num_of_clusters}, score: {self.score():.3f}")
+        plt.legend(loc="upper right")
 
     def save(self, filename: str) -> None:
         with open(filename, "w") as file:
             json.dump({"cluster_masks": self.cluster_masks}, file)
+
+    def get_representative_samples(self, cluster_index: int,
+                                   num_of_samples: int = 4,
+                                   distance: Callable = euclidean) -> List[int]:
+        # get spines in cluster
+        spine_indices = self.get_cluster(cluster_index)
+        num_of_samples = min(num_of_samples, len(spine_indices))
+        spines = self.reduced_data[spine_indices]
+        # calculate center (mean reduced data)
+        center = np.mean(spines, 0)
+        # calculate distance to center for each spine in cluster
+        distances = {}
+        for (spine, index) in zip(spines, spine_indices):
+            distances[index] = distance(center, spine)
+        # sort spines by distance
+        spine_indices.sort(key=lambda index: distances[index])
+        # return first N spines
+        return spine_indices[:num_of_samples]
 
 
 class ManualSpineClusterizer(SpineClusterizer):
@@ -138,8 +163,8 @@ class DBSCANSpineClusterizer(SKLearnSpineClusterizer):
     num_of_noise: int
 
     def __init__(self, eps: float = 0.5, min_samples: int = 2,
-                 metric: Union[str, Callable] = "euclidean"):
-        super().__init__()
+                 metric: Union[str, Callable] = "euclidean", use_pca: bool = False):
+        super().__init__(use_pca)
         self.metric = metric
         self.min_samples = min_samples
         self.eps = eps
@@ -179,6 +204,7 @@ class DBSCANSpineClusterizer(SKLearnSpineClusterizer):
                     markerfacecolor=tuple(col),
                     markeredgecolor="k",
                     markersize=14,
+                    label=f"{k}"
                 )
 
             xy = self.reduced_data[class_member_mask & ~core_samples_mask]
@@ -190,14 +216,16 @@ class DBSCANSpineClusterizer(SKLearnSpineClusterizer):
                     markerfacecolor=tuple(col),
                     markeredgecolor="k",
                     markersize=6,
+                    label=f"{k}"
                 )
         plt.title(f"Number of clusters: {self.num_of_clusters}, score: {self.score():.3f}")
+        plt.legend(loc="upper right")
 
 
 class KMeansSpineClusterizer(SKLearnSpineClusterizer):
-    def __init__(self, num_of_clusters: int):
-        super().__init__()
+    def __init__(self, num_of_clusters: int, use_pca: bool = False):
+        super().__init__(use_pca)
         self.num_of_clusters = num_of_clusters
 
     def _sklearn_fit(self, data: np.array) -> object:
-        return KMeans(n_clusters=self.num_of_clusters).fit(data)
+        return KMeans(n_clusters=self.num_of_clusters, random_state=0).fit(data)

@@ -23,8 +23,10 @@ YELLOW = (1, 0.8, 0)
 GRAY = (0.69, 0.69, 0.69)
 DARK_GRAY = (0.30, 0.30, 0.30)
 
+V_F = Tuple[np.ndarray, np.ndarray]
 
-def _mesh_to_v_f(mesh: Polyhedron_3) -> Tuple[np.ndarray, np.ndarray]:
+
+def _mesh_to_v_f(mesh: Polyhedron_3) -> V_F:
     vertices = np.ndarray((mesh.size_of_vertices(), 3))
     for i, vertex in enumerate(mesh.vertices()):
         vertex.set_id(i)
@@ -44,6 +46,13 @@ def _mesh_to_v_f(mesh: Polyhedron_3) -> Tuple[np.ndarray, np.ndarray]:
             if circulator == begin or j == 3:
                 break
     return vertices, facets
+
+
+def preprocess_meshes(spine_meshes: Dict[str, Polyhedron_3]) -> Dict[str, V_F]:
+    output = {}
+    for (spine_name, spine_mesh) in spine_meshes.items():
+        output[spine_name] = _mesh_to_v_f(spine_mesh)
+    return output
 
 
 def show_3d_mesh(mesh: Polyhedron_3) -> None:
@@ -130,15 +139,15 @@ class SpinePreview:
 
     _dendrite_colors: np.ndarray
 
-    _spine_v_f: Tuple[np.ndarray, np.ndarray]
-    _dendrite_v_f: Tuple[np.ndarray, np.ndarray]
+    _spine_v_f: V_F
+    _dendrite_v_f: V_F
 
     _metrics_box: widgets.VBox
 
     _spine_mesh_id: int
 
     def __init__(self, spine_mesh: Polyhedron_3,
-                 dendrite_v_f: Tuple[np.ndarray, np.ndarray],
+                 dendrite_v_f: V_F,
                  metrics: List[SpineMetric]) -> None:
         self._spine_mesh_id = 0
         self._dendrite_v_f = dendrite_v_f
@@ -253,7 +262,7 @@ class SelectableSpinePreview(SpinePreview):
     _initial_segmentation: Segmentation
 
     def __init__(self, spine_mesh: Polyhedron_3,
-                 dendrite_v_f: Tuple[np.ndarray, np.ndarray],
+                 dendrite_v_f: V_F,
                  dendrite_mesh: Polyhedron_3,
                  metric_names: List[str],
                  metric_params: List[Dict] = None) -> None:
@@ -362,7 +371,7 @@ def select_spines_widget(spine_meshes: List[Polyhedron_3],
                          dendrite_mesh: Polyhedron_3,
                          metric_names: List[str],
                          metric_params: List[Dict] = None) -> widgets.Widget:
-    dendrite_v_f: Tuple = _mesh_to_v_f(dendrite_mesh)
+    dendrite_v_f: V_F = _mesh_to_v_f(dendrite_mesh)
     spine_previews = [SelectableSpinePreview(spine_mesh, dendrite_v_f,
                                              dendrite_mesh, metric_names,
                                              metric_params)
@@ -606,7 +615,7 @@ def clusterization_widget(clusterizer: SpineClusterizer,
                           spine_meshes: Dict[str, Polyhedron_3],
                           dendrite_mesh: Polyhedron_3,
                           metrics: SpineMetricDataset) -> widgets.Widget:
-    dendrite_v_f: Tuple = _mesh_to_v_f(dendrite_mesh)
+    dendrite_v_f: V_F = _mesh_to_v_f(dendrite_mesh)
 
     spines_list = list(spine_meshes.values())
     metrics_list = list(metrics.rows())
@@ -639,18 +648,16 @@ def clusterization_widget(clusterizer: SpineClusterizer,
 
 
 def new_clusterization_widget(clusterizer: SpineClusterizer,
-                              spine_meshes: Dict[str, Polyhedron_3]) -> widgets.Widget:
-    # TODO: extract representative samples only
-
+                              spine_meshes: Dict[str, V_F]) -> widgets.Widget:
     # TODO: deal with dictionaries better than this PLEASE
     spine_mesh_list = list(spine_meshes.values())
 
     # for each cluster
     grid_widgets = []
-    for mask in clusterizer.cluster_masks:
-        # extract cluster meshes
+    for index in range(clusterizer.num_of_clusters):
+        # extract representative cluster meshes
         cluster = [(clusterizer.reduced_data[i], spine_mesh_list[i])
-                   for i, is_in in enumerate(mask) if is_in]
+                   for i in clusterizer.get_representative_samples(index, 9)]
         # sort by y
         cluster.sort(key=lambda x: x[0][1])
         # separate into rows
@@ -659,7 +666,7 @@ def new_clusterization_widget(clusterizer: SpineClusterizer,
 
         # make rendering grid
         grid_widgets.append(widgets.VBox(
-            [widgets.HBox([make_viewer(*_mesh_to_v_f(spine_mesh), None, 100, 100)._renderer
+            [widgets.HBox([make_viewer(*spine_mesh, None, 100, 100)._renderer
                            for (_, spine_mesh) in row])
              for row in rows]))
 
@@ -667,7 +674,7 @@ def new_clusterization_widget(clusterizer: SpineClusterizer,
         display(widgets.HBox([clusterizer.show({cluster_index}),
                               grid_widgets[cluster_index]]))
 
-    cluster_slider = widgets.IntSlider(min=0, max=len(grid_widgets) - 1)
+    cluster_slider = widgets.IntSlider(min=0, max=max(len(grid_widgets) - 1, 0))
     cluster_navigation_buttons = _make_navigation_widget(cluster_slider)
 
     return widgets.VBox([cluster_navigation_buttons,
@@ -675,46 +682,71 @@ def new_clusterization_widget(clusterizer: SpineClusterizer,
                                              cluster_index=cluster_slider)])
 
 
+def representative_clusterization_widget(clusterizer: SpineClusterizer,
+                                         spine_meshes: Dict[str, V_F],
+                                         num_of_samples: int = 3) -> widgets.Widget:
+    # TODO: deal with dictionaries better than this PLEASE
+    spine_mesh_list = list(spine_meshes.values())
+
+    # for each cluster
+    rows = []
+    for index in range(clusterizer.num_of_clusters):
+        row = [widgets.Label(f"{index}:")]
+        row.extend([make_viewer(*spine_mesh_list[i], None, 100, 100)._renderer
+                    for i in clusterizer.get_representative_samples(index, num_of_samples)])
+        rows.append(widgets.HBox(row))
+    return widgets.HBox([clusterizer.show(), widgets.VBox(rows)])
+
+
 def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
-                                 spine_meshes: Dict[str, Polyhedron_3],
+                                 spine_meshes: Dict[str, V_F],
                                  clusterizer_type,
                                  param_slider_type, param_name,
                                  param_min_value, param_max_value,
-                                 param_start_value, param_step) -> widgets.Widget:
+                                 param_start_value, param_step,
+                                 static_params: Dict) -> widgets.Widget:
     # calculate score graph
     scores = []
+    scores_pca = []
     num_of_steps = int(np.ceil((param_max_value - param_min_value) / param_step))
     param_values = [np.clip(param_min_value + param_step * i,
                     param_min_value, param_max_value) for i in range(num_of_steps)]
     for value in param_values:
-        clusterizer = clusterizer_type(**{param_name: value})
+        clusterizer = clusterizer_type(**{param_name: value}, **static_params, use_pca=False)
         clusterizer.fit(spine_metrics)
         scores.append(clusterizer.score())
+        clusterizer = clusterizer_type(**{param_name: value}, **static_params, use_pca=True)
+        clusterizer.fit(spine_metrics)
+        scores_pca.append(clusterizer.score())
 
     param_slider = param_slider_type(min=param_min_value, max=param_max_value,
                                      value=param_start_value, step=param_step,
                                      continuous_update=False)
 
     def show_clusterization(param_value) -> None:
-        clusterizer = clusterizer_type(**{param_name: param_value})
+        clusterizer = clusterizer_type(**{param_name: param_value}, **static_params)
         clusterizer.fit(spine_metrics)
-        # a = widgets.VBox([clusterizer.show(),
-        #                   new_clusterization_widget(clusterizer, spine_meshes)])
-        a = widgets.VBox([clusterizer.show()])
+        clusterizer_pca = clusterizer_type(**{param_name: param_value}, **static_params, use_pca=True)
+        clusterizer_pca.fit(spine_metrics)
 
         score_graph = widgets.Output()
         with score_graph:
             plt.axvline(x=param_value, color='g', linestyle='-')
             plt.axhline(y=0, color='r', linestyle='-')
-            plt.plot(param_values, scores)
+            plt.plot(param_values, scores, label="no pca")
+            plt.plot(param_values, scores_pca, label="pca")
             plt.title(clusterizer_type.__name__)
             plt.xlabel(param_name)
             plt.ylabel("Silhouette score")
             plt.ylim([-1, 1])
+            plt.legend(loc="upper right")
             plt.show()
 
-        b = widgets.HBox([a, score_graph])
-        display(b)
+        # display(widgets.VBox([widgets.HBox([clusterizer.show(), score_graph]),
+        #                       new_clusterization_widget(clusterizer, spine_meshes)]))
+        display(widgets.VBox([widgets.HBox([widgets.VBox([clusterizer.show(), clusterizer_pca.show()]), score_graph]),
+                              representative_clusterization_widget(clusterizer_pca, spine_meshes, 5)]))
+        # display(widgets.VBox([widgets.HBox([widgets.VBox([clusterizer.show(), clusterizer_pca.show()]), score_graph])]))
 
     clusterization_result = widgets.interactive(show_clusterization,
                                                 param_value=param_slider)
@@ -725,18 +757,19 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
 
 
 def k_means_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
-                                         spine_meshes: Dict[str, Polyhedron_3],
+                                         spine_meshes: Dict[str, V_F],
                                          min_num_of_clusters: int = 2,
                                          max_num_of_clusters: int = 20) -> widgets.Widget:
     return clustering_experiment_widget(spine_metrics, spine_meshes,
                                         KMeansSpineClusterizer,
                                         widgets.IntSlider, "num_of_clusters",
                                         min_num_of_clusters, max_num_of_clusters,
-                                        min_num_of_clusters, 1)
+                                        min_num_of_clusters, 1, {})
 
 
 def dbscan_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
-                                        spine_meshes: Dict[str, Polyhedron_3],
+                                        spine_meshes: Dict[str, V_F],
+                                        metric="euclidean",
                                         min_eps: float = 2,
                                         max_eps: float = 20,
                                         eps_step: float = 0.1) -> widgets.Widget:
@@ -744,4 +777,4 @@ def dbscan_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                         DBSCANSpineClusterizer,
                                         widgets.FloatSlider, "eps",
                                         min_eps, max_eps,
-                                        min_eps, eps_step)
+                                        min_eps, eps_step, {"metric": metric})
