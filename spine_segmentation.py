@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Tuple
 import networkx as nx
 import ast
 from scipy.ndimage import binary_erosion
@@ -87,7 +87,8 @@ def old_get_surface_points(image: np.ndarray) -> Point_set_3:
     return out
 
 
-def get_surface_points(image: np.ndarray, verbose: bool = False) -> Point_set_3:
+def get_surface_points(image: np.ndarray, sampling_density: Tuple[float, float, float],
+                       verbose: bool = False) -> Point_set_3:
     # image = np.pad(image, 1)
 
     # find surface points
@@ -106,7 +107,7 @@ def get_surface_points(image: np.ndarray, verbose: bool = False) -> Point_set_3:
         if verbose and i / surface_points.shape[0] * 10 > cnt:
             print(f"{i / surface_points.shape[0] * 100}%")
             cnt += 1
-        point = list_2_point(surface_points[i])
+        point = list_2_point(surface_points[i] * sampling_density)
         normal = Vector_3(grad[0][surface_points[i, 0], surface_points[i, 1], surface_points[i, 2]],
                           grad[1][surface_points[i, 0], surface_points[i, 1], surface_points[i, 2]],
                           grad[2][surface_points[i, 0], surface_points[i, 1], surface_points[i, 2]])
