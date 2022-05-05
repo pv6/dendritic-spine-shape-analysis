@@ -57,7 +57,8 @@ def preprocess_meshes(spine_meshes: Dict[str, Polyhedron_3]) -> Dict[str, V_F]:
 
 def show_3d_mesh(mesh: Polyhedron_3) -> None:
     vertices, facets = _mesh_to_v_f(mesh)
-    mp.plot(vertices, facets, shading={"wireframe": True})
+    mp.plot(vertices, facets)
+    # mp.plot(vertices, facets, shading={"wireframe": True})
 
 
 def show_line_set(lines: List[Tuple[Point_3, Point_3]], mesh) -> None:
@@ -706,18 +707,21 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                  param_start_value, param_step,
                                  static_params: Dict) -> widgets.Widget:
     # calculate score graph
-    scores = []
-    scores_pca = []
+    scores = {-1: [], 2: []}
+    pca_dim = spine_metrics.row_as_array(spine_metrics.spine_names[0]).size // 2
+    while pca_dim >= 2:
+        scores[pca_dim] = []
+        pca_dim //= 2
+
     num_of_steps = int(np.ceil((param_max_value - param_min_value) / param_step))
     param_values = [np.clip(param_min_value + param_step * i,
                     param_min_value, param_max_value) for i in range(num_of_steps)]
-    for value in param_values:
-        clusterizer = clusterizer_type(**{param_name: value}, **static_params, use_pca=False)
-        clusterizer.fit(spine_metrics)
-        scores.append(clusterizer.score())
-        clusterizer = clusterizer_type(**{param_name: value}, **static_params, use_pca=True)
-        clusterizer.fit(spine_metrics)
-        scores_pca.append(clusterizer.score())
+
+    for (dim, dim_scores) in scores.items():
+        for value in param_values:
+            clusterizer = clusterizer_type(**{param_name: value}, **static_params, pca_dim=dim)
+            clusterizer.fit(spine_metrics)
+            dim_scores.append(clusterizer.score())
 
     param_slider = param_slider_type(min=param_min_value, max=param_max_value,
                                      value=param_start_value, step=param_step,
@@ -726,26 +730,29 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
     def show_clusterization(param_value) -> None:
         clusterizer = clusterizer_type(**{param_name: param_value}, **static_params)
         clusterizer.fit(spine_metrics)
-        clusterizer_pca = clusterizer_type(**{param_name: param_value}, **static_params, use_pca=True)
-        clusterizer_pca.fit(spine_metrics)
 
         score_graph = widgets.Output()
         with score_graph:
             plt.axvline(x=param_value, color='g', linestyle='-')
             plt.axhline(y=0, color='r', linestyle='-')
-            plt.plot(param_values, scores, label="no pca")
-            plt.plot(param_values, scores_pca, label="pca")
+            for (dim, dim_scores) in scores.items():
+                if dim == -1:
+                    plot_label = "no pca"
+                else:
+                    plot_label = f"{dim}d with pca "
+                plt.plot(param_values, dim_scores, label=plot_label)
             plt.title(clusterizer_type.__name__)
             plt.xlabel(param_name)
             plt.ylabel("Silhouette score")
             plt.ylim([-1, 1])
-            plt.legend(loc="upper right")
+            plt.legend(loc="lower right")
+            # plt.rcParams["figure.figsize"] = (10, 10)
             plt.show()
 
         # display(widgets.VBox([widgets.HBox([clusterizer.show(), score_graph]),
         #                       new_clusterization_widget(clusterizer, spine_meshes)]))
-        display(widgets.VBox([widgets.HBox([widgets.VBox([clusterizer.show(), clusterizer_pca.show()]), score_graph]),
-                              representative_clusterization_widget(clusterizer_pca, spine_meshes, 5)]))
+        display(widgets.VBox([widgets.HBox([clusterizer.show(), score_graph]),
+                              representative_clusterization_widget(clusterizer, spine_meshes, 5)]))
         # display(widgets.VBox([widgets.HBox([widgets.VBox([clusterizer.show(), clusterizer_pca.show()]), score_graph])]))
 
     clusterization_result = widgets.interactive(show_clusterization,

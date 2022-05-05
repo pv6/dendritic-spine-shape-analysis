@@ -73,7 +73,6 @@ class SpineMetric(ABC):
             return [self.value]
 
 
-# SpineMetricDataset = Dict[str, List[SpineMetric]]
 class SpineMetricDataset:
     num_of_spines: int
     num_of_metrics: int
@@ -155,6 +154,16 @@ class SpineMetricDataset:
         output = deepcopy(self)
         output.standardize()
         return output
+
+    def row_as_array(self, spine_name: str) -> np.array:
+        data = []
+        for spine_metric in self.row(spine_name):
+            data += spine_metric.value_as_list()
+        return np.asarray(data)
+
+    def as_array(self) -> np.ndarray:
+        data = [self.row_as_array(spine_name) for spine_name in self.spine_names]
+        return np.asarray(data)
 
 
 def calculate_metrics(spine_mesh: Polyhedron_3,

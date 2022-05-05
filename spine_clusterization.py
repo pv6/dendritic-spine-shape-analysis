@@ -16,13 +16,15 @@ class SpineClusterizer(ABC):
     num_of_clusters: int
     sample_size: int
     reduced_data: np.ndarray
-    use_pca: bool
+    pca_dim: int
     _data: np.ndarray
+    metric: Union[Callable[[np.ndarray, np.ndarray], float], str]
 
-    def __init__(self, use_pca: bool = False):
+    def __init__(self, metric: Union[Callable, str] = "euclidean", pca_dim: int = -1):
         self.cluster_masks = []
         self.num_of_clusters = 0
-        self.use_pca = use_pca
+        self.pca_dim = pca_dim
+        self.metric = metric
 
     def get_cluster(self, index: int) -> List[int]:
         return [i for i, x in enumerate(self.cluster_masks[index]) if x]
@@ -44,25 +46,21 @@ class SpineClusterizer(ABC):
     def fit(self, spine_metrics: SpineMetricDataset) -> None:
         self.sample_size = spine_metrics.num_of_spines
 
-        # stack metrics into single vector
-        data = []
-        for one_spine_metrics in spine_metrics.rows():
-            data.append([])
-            for spine_metric in one_spine_metrics:
-                data[-1] += spine_metric.value_as_list()
-        self._data = np.asarray(data)
-        pca = PCA(2)
-        self.reduced_data = pca.fit_transform(self._data)
-        if self.use_pca:
-            self._data = self.reduced_data
+        self._data = spine_metrics.as_array()
+        if self.pca_dim != -1:
+            self._data = PCA(self.pca_dim).fit_transform(self._data)
+
+        self.reduced_data = PCA(2).fit_transform(self._data)
+
         self._fit(self._data)
 
-    def score(self, metric: Union[str, Callable] = "euclidean") -> float:
+    def score(self) -> float:
         # TODO: change nan to something sensical
         if self.num_of_clusters < 2 or self.sample_size - 1 < self.num_of_clusters:
             return float("nan")
         labels = self.get_labels()
-        return silhouette_score(self._data, labels, metric=metric)
+        # return silhouette_score(self._data, labels, metric=self.metric)
+        return silhouette_score(self._data, labels, metric="euclidean")
 
     @abstractmethod
     def _fit(self, data: np.array) -> object:
@@ -159,12 +157,11 @@ class SKLearnSpineClusterizer(SpineClusterizer, ABC):
 class DBSCANSpineClusterizer(SKLearnSpineClusterizer):
     eps: float
     min_samples: int
-    metric: Union[str, Callable[[np.ndarray, np.ndarray], float]]
     num_of_noise: int
 
     def __init__(self, eps: float = 0.5, min_samples: int = 2,
-                 metric: Union[str, Callable] = "euclidean", use_pca: bool = False):
-        super().__init__(use_pca)
+                 metric: Union[str, Callable] = "euclidean", pca_dim: int = -1):
+        super().__init__(metric=metric, pca_dim=pca_dim)
         self.metric = metric
         self.min_samples = min_samples
         self.eps = eps
@@ -223,8 +220,8 @@ class DBSCANSpineClusterizer(SKLearnSpineClusterizer):
 
 
 class KMeansSpineClusterizer(SKLearnSpineClusterizer):
-    def __init__(self, num_of_clusters: int, use_pca: bool = False):
-        super().__init__(use_pca)
+    def __init__(self, num_of_clusters: int, pca_dim: int = -1):
+        super().__init__(pca_dim=pca_dim)
         self.num_of_clusters = num_of_clusters
 
     def _sklearn_fit(self, data: np.array) -> object:
