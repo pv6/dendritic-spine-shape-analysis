@@ -66,6 +66,25 @@ class SpineMetric(ABC):
     def show(self) -> widgets.Widget:
         return widgets.Label(str(self.value))
 
+    @classmethod
+    @abstractmethod
+    def get_distribution(cls, metrics: List["SpineMetric"]) -> np.ndarray:
+        pass
+
+    @classmethod
+    def show_distribution(cls, metrics: List["SpineMetric"]) -> widgets.Widget:
+        graph = widgets.Output()
+        with graph:
+            cls._show_distribution(metrics)
+            plt.title(cls.__name__)
+            plt.show()
+        return graph
+
+    @classmethod
+    @abstractmethod
+    def _show_distribution(cls, metrics: List["SpineMetric"]) -> None:
+        pass
+
     def value_as_list(self) -> List[Any]:
         try:
             return [*self.value]
@@ -124,7 +143,11 @@ class SpineMetricDataset:
             metrics[spine_name] = calculate_metrics(spine_mesh, metric_names, params)
         self.__init__(metrics)
 
-    def get_subset(self, reduced_metric_names: List[str]) -> "SpineMetricDataset":
+    def get_spines_subset(self, reduced_spine_names: List[str]) -> "SpineMetricDataset":
+        reduced_spines = {spine_name: self.row(spine_name) for spine_name in reduced_spine_names}
+        return SpineMetricDataset(reduced_spines)
+
+    def get_metrics_subset(self, reduced_metric_names: List[str]) -> "SpineMetricDataset":
         index_subset = [self._metric_2_column[metric_name]
                         for metric_name in reduced_metric_names]
         reduced_metrics = {}
@@ -164,6 +187,10 @@ class SpineMetricDataset:
     def as_array(self) -> np.ndarray:
         data = [self.row_as_array(spine_name) for spine_name in self.spine_names]
         return np.asarray(data)
+
+
+def get_metric_class(metric_name):
+    return globals()[metric_name + "SpineMetric"]
 
 
 def calculate_metrics(spine_mesh: Polyhedron_3,
@@ -225,6 +252,14 @@ class FloatSpineMetric(SpineMetric, ABC):
     def show(self) -> widgets.Widget:
         return widgets.Label(f"{self._value:.2f}")
 
+    @classmethod
+    def get_distribution(cls, metrics: List["SpineMetric"]) -> np.ndarray:
+        return np.asarray([metric.value for metric in metrics])
+
+    @classmethod
+    def _show_distribution(cls, metrics: List["SpineMetric"]) -> None:
+        plt.boxplot(cls.get_distribution(metrics))
+
 
 class AreaSpineMetric(FloatSpineMetric):
     def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
@@ -233,7 +268,7 @@ class AreaSpineMetric(FloatSpineMetric):
 
 class VolumeSpineMetric(FloatSpineMetric):
     def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
-        return volume(spine_mesh)
+        return abs(volume(spine_mesh))
 
 
 class ConvexHullVolumeSpineMetric(FloatSpineMetric):
@@ -247,7 +282,7 @@ class ConvexHullRatioSpineMetric(FloatSpineMetric):
     def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
         hull_mesh = Polyhedron_3()
         convex_hull_3(spine_mesh.points(), hull_mesh)
-        v = volume(spine_mesh)
+        v = abs(volume(spine_mesh))
         return (volume(hull_mesh) - v) / v
 
 
@@ -347,6 +382,18 @@ class HistogramSpineMetric(SpineMetric):
             plt.show()
 
         return out
+
+    @classmethod
+    def get_distribution(cls, metrics: List["SpineMetric"]) -> np.ndarray:
+        histograms = np.asarray([metric.value for metric in metrics])
+        return np.mean(histograms, 0)
+
+    @classmethod
+    def _show_distribution(cls, metrics: List["SpineMetric"]) -> None:
+        value = cls.get_distribution(metrics)
+        left_edges = [i / len(value) for i in range(len(value))]
+        width = 0.85 * (left_edges[1] - left_edges[0])
+        plt.bar(left_edges, value, align='edge', width=width)
 
     @abstractmethod
     def _calculate_distribution(self, spine_mesh: Polyhedron_3) -> np.array:

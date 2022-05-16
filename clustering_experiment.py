@@ -1,19 +1,11 @@
 import matplotlib.pyplot as plt
-
 from spine_clusterization import DBSCANSpineClusterizer, KMeansSpineClusterizer, ManualSpineClusterizer
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3
 from spine_metrics import SpineMetricDataset, save_metrics, load_metrics
 import numpy as np
 from scipy.special import kl_div
+from notebook_widgets import create_dir, load_spine_meshes
 import itertools
-import os
-
-
-def create_dir(dir_name: str) -> None:
-    try:
-        os.mkdir(dir_name)
-    except OSError as error:
-        pass
 
 
 metric_names = ["OldChordDistribution", "OpenAngle", "CVD", "AverageDistance",
@@ -21,38 +13,12 @@ metric_names = ["OldChordDistribution", "OpenAngle", "CVD", "AverageDistance",
 
 # load meshes
 full_mesh = Polyhedron_3("output/image1/surface_mesh.off")
-spine_meshes = {}
-for i in range(13):
-    filename = f"output/image1/spine_{i}.off"
-    spine_meshes[filename] = Polyhedron_3(filename)
-for i in range(10):
-    filename = f"output/image2/spine_{i}.off"
-    spine_meshes[filename] = Polyhedron_3(filename)
-for i in range(26):
-    filename = f"output/Image2-1_small/spine_{i}.off"
-    spine_meshes[filename] = Polyhedron_3(filename)
-for i in range(7):
-    filename = f"output/Image2-4_small_bin/spine_{i}.off"
-    spine_meshes[filename] = Polyhedron_3(filename)
-for i in range(7):
-    filename = f"output/Image2-5_small_bin/spine_{i}.off"
-    spine_meshes[filename] = Polyhedron_3(filename)
-for i in range(13):
-    filename = f"output/3-1/spine_{i}.off"
-    spine_meshes[filename] = Polyhedron_3(filename)
-for i in range(11):
-    filename = f"output/3-4/spine_{i}.off"
-    spine_meshes[filename] = Polyhedron_3(filename)
-for i in range(18):
-    if i == 8:
-        continue
-    filename = f"output/3-8/spine_{i}.off"
-    spine_meshes[filename] = Polyhedron_3(filename)
+spine_meshes = load_spine_meshes()
 
-# every_spine_metrics = SpineMetricDataset()
-# every_spine_metrics.calculate_metrics(spine_meshes, metric_names)
-# create_dir("output/clustering")
-# save_metrics(every_spine_metrics, "output/clustering/metrics.csv")
+every_spine_metrics = SpineMetricDataset()
+every_spine_metrics.calculate_metrics(spine_meshes, metric_names)
+create_dir("output/clustering")
+save_metrics(every_spine_metrics, "output/clustering/metrics.csv")
 
 every_spine_metrics = load_metrics("output/clustering/metrics.csv")
 every_spine_metrics.standardize()
@@ -88,7 +54,7 @@ for num_of_clusters in range(2, 30):
 #     for index_subset in itertools.combinations(list(range(len(metric_names))), L):
 for index_subset in index_subsets:
     reduced_metric_names = [metric_names[i] for i in index_subset]
-    reduced_metrics = every_spine_metrics.get_subset(reduced_metric_names)
+    reduced_metrics = every_spine_metrics.get_metrics_subset(reduced_metric_names)
 
     base_save_dir = f"output/clustering/{str(reduced_metric_names)}"
     create_dir(base_save_dir)

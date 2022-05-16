@@ -10,9 +10,12 @@ from spine_segmentation import point_2_list, list_2_point, hash_point, \
     spines_to_segmentation, correct_segmentation, get_spine_meshes
 import meshplot as mp
 from IPython.display import display
-from spine_metrics import SpineMetric, SpineMetricDataset, calculate_metrics
+from spine_metrics import SpineMetric, SpineMetricDataset, calculate_metrics, \
+    get_metric_class, HistogramSpineMetric, FloatSpineMetric
 from scipy.ndimage.measurements import label
 from spine_clusterization import SpineClusterizer, KMeansSpineClusterizer, DBSCANSpineClusterizer
+from pathlib import Path
+import os
 
 
 RED = (1, 0, 0)
@@ -46,6 +49,23 @@ def _mesh_to_v_f(mesh: Polyhedron_3) -> V_F:
             if circulator == begin or j == 3:
                 break
     return vertices, facets
+
+
+def create_dir(dir_name: str) -> None:
+    try:
+        os.mkdir(dir_name)
+    except OSError as error:
+        pass
+
+
+def load_spine_meshes(folder_path: str = "output",
+                      spine_file_pattern: str = "**/spine_*.off") -> Dict[str, Polyhedron_3]:
+    output = {}
+    path = Path(folder_path)
+    spine_names = list(path.glob(spine_file_pattern))
+    for spine_name in spine_names:
+        output[str(spine_name)] = Polyhedron_3(str(spine_name))
+    return output
 
 
 def preprocess_meshes(spine_meshes: Dict[str, Polyhedron_3]) -> Dict[str, V_F]:
@@ -707,11 +727,12 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                  param_start_value, param_step,
                                  static_params: Dict) -> widgets.Widget:
     # calculate score graph
-    scores = {-1: [], 2: []}
-    pca_dim = spine_metrics.row_as_array(spine_metrics.spine_names[0]).size // 2
-    while pca_dim >= 2:
-        scores[pca_dim] = []
-        pca_dim //= 2
+    scores = {-1: []}
+    # scores = {-1: [], 2: []}
+    # pca_dim = spine_metrics.row_as_array(spine_metrics.spine_names[0]).size // 2
+    # while pca_dim >= 2:
+    #     scores[pca_dim] = []
+    #     pca_dim //= 2
 
     num_of_steps = int(np.ceil((param_max_value - param_min_value) / param_step))
     param_values = [np.clip(param_min_value + param_step * i,
@@ -751,8 +772,10 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
 
         # display(widgets.VBox([widgets.HBox([clusterizer.show(), score_graph]),
         #                       new_clusterization_widget(clusterizer, spine_meshes)]))
+        # display(widgets.VBox([widgets.HBox([clusterizer.show(), score_graph])]))
         display(widgets.VBox([widgets.HBox([clusterizer.show(), score_graph]),
-                              representative_clusterization_widget(clusterizer, spine_meshes, 5)]))
+                              representative_clusterization_widget(clusterizer, spine_meshes, 5),
+                              cluster_metric_distribution_widget(clusterizer, spine_metrics)]))
         # display(widgets.VBox([widgets.HBox([widgets.VBox([clusterizer.show(), clusterizer_pca.show()]), score_graph])]))
 
     clusterization_result = widgets.interactive(show_clusterization,
@@ -785,3 +808,54 @@ def dbscan_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                         widgets.FloatSlider, "eps",
                                         min_eps, max_eps,
                                         min_eps, eps_step, {"metric": metric})
+
+
+def cluster_metric_distribution_widget(clusterizer: SpineClusterizer,
+                                       metrics: SpineMetricDataset) -> widgets.Widget:
+    # distributions = []
+    # for cluster in clusterizer.get_clusters():
+    #     cluster_metrics = metrics.get_spines_subset(cluster)
+    #     metric_boxplots = []
+    #     for i, metric_name in enumerate(cluster_metrics.metric_names):
+    #         metric_column = cluster_metrics.column(metric_name)
+    #         metric_boxplots.append(metric_column[0].show_distribution(metric_column))
+    #     distributions.append(widgets.HBox(metric_boxplots))
+    #
+    # # def show_distribution_by_cluster(cluster_index: int):
+    # #     display(distributions[cluster_index])
+    #
+    # slider = widgets.IntSlider(min=0, max=max(0, clusterizer.num_of_clusters - 1))
+    # navigation_buttons = _make_navigation_widget(slider)
+    #
+    # return widgets.VBox([navigation_buttons,
+    #                      widgets.interactive(lambda index: display(distributions[index]),
+    #                                          index=slider)])
+    metric_distributions = []
+    for metric_name in metrics.metric_names:
+        distribution_graph = widgets.Output()
+        metric_class = get_metric_class(metric_name)
+        with distribution_graph:
+            data = []
+            for i, cluster in enumerate(clusterizer.get_clusters()):
+                cluster_metrics = metrics.get_spines_subset(cluster)
+                metric_column = cluster_metrics.column(metric_name)
+                data.append(metric_class.get_distribution(metric_column))
+                if issubclass(metric_class, HistogramSpineMetric):
+                    value = metric_class.get_distribution(metric_column)
+                    left_edges = [1.0 * i + j / len(value) for j in range(len(value))]
+                    width = 1.0 * (left_edges[1] - left_edges[0])
+                    plt.bar(left_edges, value, align='edge', width=width)
+
+            if issubclass(metric_class, FloatSpineMetric):
+                plt.boxplot(data)
+            plt.title(metric_name)
+            plt.show()
+        metric_distributions.append(distribution_graph)
+
+    slider = widgets.IntSlider(min=0, max=max(0, len(metric_distributions) - 1))
+    navigation_buttons = _make_navigation_widget(slider)
+
+    # return widgets.VBox([navigation_buttons,
+    #                      widgets.interactive(lambda index: display(metric_distributions[index]),
+    #                                          index=slider)])
+    return widgets.HBox(metric_distributions, layout=widgets.Layout(width='3000px'))

@@ -9,6 +9,7 @@ import numpy as np
 from sklearn.decomposition import PCA
 from abc import ABC, abstractmethod
 import json
+from scipy.special import kl_div
 
 
 class SpineClusterizer(ABC):
@@ -19,15 +20,25 @@ class SpineClusterizer(ABC):
     pca_dim: int
     _data: np.ndarray
     metric: Union[Callable[[np.ndarray, np.ndarray], float], str]
+    dataset: SpineMetricDataset
 
     def __init__(self, metric: Union[Callable, str] = "euclidean", pca_dim: int = -1):
         self.cluster_masks = []
         self.num_of_clusters = 0
         self.pca_dim = pca_dim
         self.metric = metric
+        self.dataset = SpineMetricDataset({})
 
     def get_cluster(self, index: int) -> List[int]:
         return [i for i, x in enumerate(self.cluster_masks[index]) if x]
+
+    def get_clusters(self) -> List[List[str]]:
+        output = []
+        names = self.dataset.spine_names
+        for mask in self.cluster_masks:
+            cluster = [names[i] for i, is_in in enumerate(mask) if is_in]
+            output.append(cluster)
+        return output
 
     def get_labels(self) -> List[int]:
         output = [-1] * self.sample_size
@@ -44,6 +55,8 @@ class SpineClusterizer(ABC):
         plt.clf()
 
     def fit(self, spine_metrics: SpineMetricDataset) -> None:
+        self.dataset = spine_metrics
+
         self.sample_size = spine_metrics.num_of_spines
 
         self._data = spine_metrics.as_array()
@@ -56,11 +69,12 @@ class SpineClusterizer(ABC):
 
     def score(self) -> float:
         # TODO: change nan to something sensical
+        labels = self.get_labels()
         if self.num_of_clusters < 2 or self.sample_size - 1 < self.num_of_clusters:
             return float("nan")
         labels = self.get_labels()
-        # return silhouette_score(self._data, labels, metric=self.metric)
-        return silhouette_score(self._data, labels, metric="euclidean")
+        return silhouette_score(self._data, labels, metric=self.metric)
+        # return silhouette_score(self._data, labels, metric="euclidean")
 
     @abstractmethod
     def _fit(self, data: np.array) -> object:
@@ -118,8 +132,9 @@ class SpineClusterizer(ABC):
 
 
 class ManualSpineClusterizer(SpineClusterizer):
-    def __init__(self, cluster_masks: List[List[bool]]):
-        super().__init__()
+    def __init__(self, cluster_masks: List[List[bool]],
+                 metric: Union[str, Callable] = "euclidean"):
+        super().__init__(metric=metric)
         self.cluster_masks = cluster_masks
         self.num_of_clusters = len(cluster_masks)
         if self.num_of_clusters > 0:
@@ -152,7 +167,36 @@ class SKLearnSpineClusterizer(SpineClusterizer, ABC):
     @abstractmethod
     def _sklearn_fit(self, data: np.ndarray) -> object:
         pass
-        
+
+
+def ks_test(x: np.ndarray, y: np.ndarray) -> float:
+    output = 0
+    sum_x = 0
+    sum_y = 0
+    for i in range(x.size):
+        sum_x += x[i]
+        sum_y += y[i]
+        output = max(output, abs(sum_x - sum_y))
+
+    return output / x.size
+
+
+def chi_square_distance(x: np.ndarray, y: np.ndarray) -> float:
+    return 0.5 * np.sum(((x - y) ** 2) / (x + y))
+
+
+def symmetric_kl_div(x: np.ndarray, y: np.ndarray) -> float:
+    x += np.ones_like(x) * 0.001
+    x /= np.sum(x)
+    y += np.ones_like(x) * 0.001
+    y /= np.sum(x)
+
+    a = kl_div(x, y)
+    b = kl_div(y, x)
+
+    s = np.sum((a + b) / 2)
+    return float(s) / x.size
+
 
 class DBSCANSpineClusterizer(SKLearnSpineClusterizer):
     eps: float
@@ -165,6 +209,17 @@ class DBSCANSpineClusterizer(SKLearnSpineClusterizer):
         self.metric = metric
         self.min_samples = min_samples
         self.eps = eps
+
+    def score(self) -> float:
+        # TODO: change nan to something sensical
+        # if self.num_of_noise / self.sample_size > 0.15 or self.num_of_clusters < 2 or self.sample_size - self.num_of_noise - 1 < self.num_of_clusters:
+        if self.num_of_clusters < 2 or self.sample_size - self.num_of_noise - 1 < self.num_of_clusters:
+            return float("nan")
+        labels = self.get_labels()
+        indices_to_delete = np.argwhere(np.asarray(labels) == -1)
+        filtered_data = np.delete(self._data, indices_to_delete, 0)
+        filtered_labels = np.delete(labels, indices_to_delete, 0)
+        return silhouette_score(filtered_data, filtered_labels, metric=self.metric)
 
     def _sklearn_fit(self, data: np.array) -> object:
         clusterized = DBSCAN(eps=self.eps, min_samples=self.min_samples, metric=self.metric).fit(data)

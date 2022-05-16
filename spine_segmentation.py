@@ -87,7 +87,19 @@ def old_get_surface_points(image: np.ndarray) -> Point_set_3:
     return out
 
 
-def get_surface_points(image: np.ndarray, sampling_density: Tuple[float, float, float],
+def apply_scale(mesh: Polyhedron_3,
+                scale: Tuple[float, float, float]) -> Polyhedron_3:
+    output = mesh.deepcopy()
+    for v in output.vertices():
+        p = v.point()
+        v.set_point(Point_3(p.x() * scale[0],
+                            p.y() * scale[1],
+                            p.z() * scale[2]))
+    return output
+
+
+def get_surface_points(image: np.ndarray,
+                       sampling_density: Tuple[float, float, float] = (1, 1, 1),
                        verbose: bool = False) -> Point_set_3:
     # image = np.pad(image, 1)
 
