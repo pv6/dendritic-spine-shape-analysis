@@ -1,9 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Tuple
 import networkx as nx
 import ast
-from PIL import Image
 from scipy.ndimage import binary_erosion
 from CGAL.CGAL_Kernel import Point_3, Vector_3, Point_2
 from CGAL.CGAL_Point_set_3 import Point_set_3
@@ -14,7 +13,7 @@ from CGAL.CGAL_Polygon_mesh_processing import Polylines, \
     remove_connected_components, keep_connected_components
 import json
 from scipy.ndimage.filters import median_filter
-from tifffile import imsave
+from tifffile import imsave, imread
 
 
 Correspondence = Dict[str, Point_3]
@@ -23,30 +22,15 @@ Segmentation = Set[str]
 
 
 def load_tif(filename: str) -> np.ndarray:
-    # open image
-    image = Image.open(filename)
+    image = imread(filename)
+    image = np.moveaxis(image, 0, -1)
 
-    # extract every frame
-    result = []
-    try:
-        i = 0
-        while True:
-            image.seek(i)
-            i += 1
-            frame = np.array(image)
-            result.append(frame)
-    except EOFError:
-        pass
-
-    # stack frames together into ndarray
-    result = np.stack(result, -1)
-
-    if result.dtype == "uint16":
+    if image.dtype == "uint16":
         alpha = 255 / 65535
-        result = result.astype("float") * alpha
-        result = np.round(result).astype("uint8")
+        image = image.astype("float") * alpha
+        image = np.round(image).astype("uint8")
 
-    return result
+    return image
 
 
 def save_tif(filename: str, image: np.ndarray) -> None:
@@ -60,10 +44,6 @@ def local_threshold_3d(image: np.ndarray, base_threshold: int = 127,
     threshold = base_threshold - weight * (base_threshold - local_median)
     output = np.zeros_like(image)
     output[image > threshold] = 255
-    # for z in range(image.shape[2]):
-    #     local_mean = threshold_local(image[:, :, z], block_size=block_size)
-    #     threshold = base_threshold + weight * (base_threshold - local_mean)
-    #     output[:, :, z] = image[:, :, z] > threshold
 
     return output
 
@@ -107,7 +87,20 @@ def old_get_surface_points(image: np.ndarray) -> Point_set_3:
     return out
 
 
-def get_surface_points(image: np.ndarray, verbose: bool = False) -> Point_set_3:
+def apply_scale(mesh: Polyhedron_3,
+                scale: Tuple[float, float, float]) -> Polyhedron_3:
+    output = mesh.deepcopy()
+    for v in output.vertices():
+        p = v.point()
+        v.set_point(Point_3(p.x() * scale[0],
+                            p.y() * scale[1],
+                            p.z() * scale[2]))
+    return output
+
+
+def get_surface_points(image: np.ndarray,
+                       sampling_density: Tuple[float, float, float] = (1, 1, 1),
+                       verbose: bool = False) -> Point_set_3:
     # image = np.pad(image, 1)
 
     # find surface points
@@ -126,7 +119,7 @@ def get_surface_points(image: np.ndarray, verbose: bool = False) -> Point_set_3:
         if verbose and i / surface_points.shape[0] * 10 > cnt:
             print(f"{i / surface_points.shape[0] * 100}%")
             cnt += 1
-        point = list_2_point(surface_points[i])
+        point = list_2_point(surface_points[i] * sampling_density)
         normal = Vector_3(grad[0][surface_points[i, 0], surface_points[i, 1], surface_points[i, 2]],
                           grad[1][surface_points[i, 0], surface_points[i, 1], surface_points[i, 2]],
                           grad[2][surface_points[i, 0], surface_points[i, 1], surface_points[i, 2]])
@@ -420,3 +413,26 @@ def expand_segmentation(segmentation: Segmentation, mesh: Polyhedron_3,
         out = out.union(points_to_add)
 
     return out
+
+
+def shrink_segmentation(segmentation: Segmentation, mesh: Polyhedron_3,
+                        wave_num: int) -> Segmentation:
+    output = segmentation.copy()
+
+    for i in range(wave_num):
+        points_to_remove = set()
+        for h in mesh.halfedges():
+            p_in = hash_point(h.vertex().point())
+            p_out = hash_point(h.opposite().vertex().point())
+            if p_in in output and p_out not in output:
+                points_to_remove.add(hash_point(h.vertex().point()))
+        output = output.difference(points_to_remove)
+
+    return output
+
+
+def correct_segmentation(segmentation: Segmentation, mesh: Polyhedron_3,
+                         delta: int) -> Segmentation:
+    if delta > 0:
+        return expand_segmentation(segmentation, mesh, delta)
+    return shrink_segmentation(segmentation, mesh, -delta)

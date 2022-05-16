@@ -12,6 +12,7 @@ from CGAL.CGAL_AABB_tree import AABB_tree_Polyhedron_3_Facet_handle
 from matplotlib import pyplot as plt
 import csv
 from CGAL.CGAL_Convex_hull_3 import convex_hull_3
+from copy import deepcopy
 
 
 def _calculate_facet_center(facet: Polyhedron_3_Facet_handle) -> Vector_3:
@@ -39,16 +40,49 @@ def _point_2_vec(point: Point_3) -> Vector_3:
 
 class SpineMetric(ABC):
     name: str
-    value: Any
+    _value: Any
 
-    def __init__(self, spine_mesh: Polyhedron_3) -> None:
+    def __init__(self, spine_mesh: Polyhedron_3 = None) -> None:
+        self.name = type(self).__name__.replace("SpineMetric", "")
+        if spine_mesh is not None:
+            self.value = self._calculate(spine_mesh)
+
+    @property
+    def value(self) -> Any:
+        return self._value
+
+    @value.setter
+    def value(self, new_value: Any) -> None:
+        self._value = new_value
+
+    def calculate(self, spine_mesh: Polyhedron_3) -> Any:
         self.value = self._calculate(spine_mesh)
+        return self.value
 
     @abstractmethod
     def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
         pass
 
-    def show(self) -> None:
+    def show(self) -> widgets.Widget:
+        return widgets.Label(str(self.value))
+
+    @classmethod
+    @abstractmethod
+    def get_distribution(cls, metrics: List["SpineMetric"]) -> np.ndarray:
+        pass
+
+    @classmethod
+    def show_distribution(cls, metrics: List["SpineMetric"]) -> widgets.Widget:
+        graph = widgets.Output()
+        with graph:
+            cls._show_distribution(metrics)
+            plt.title(cls.__name__)
+            plt.show()
+        return graph
+
+    @classmethod
+    @abstractmethod
+    def _show_distribution(cls, metrics: List["SpineMetric"]) -> None:
         pass
 
     def value_as_list(self) -> List[Any]:
@@ -58,14 +92,105 @@ class SpineMetric(ABC):
             return [self.value]
 
 
-class ManualSpineMetric(SpineMetric):
-    def __init__(self, name: str, value: Any) -> None:
-        super().__init__(Polyhedron_3())
-        self.value = value
-        self.name = name
+class SpineMetricDataset:
+    num_of_spines: int
+    num_of_metrics: int
+    _spine_2_row: Dict[str, int]
+    _metric_2_column: Dict[str, int]
+    _table = np.ndarray
 
-    def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
-        pass
+    def __init__(self, metrics: Dict[str, List[SpineMetric]] = None) -> None:
+        if metrics is None:
+            metrics = {}
+        self.num_of_spines = len(metrics)
+        first_row = []
+        if self.num_of_spines > 0:
+            first_row = list(metrics.values())[0]
+        self.num_of_metrics = len(first_row)
+
+        self._spine_2_row = {spine_name: i for i, spine_name in enumerate(metrics.keys())}
+        self._metric_2_column = {metric.name: i for i, metric in enumerate(first_row)}
+
+        self._table = np.ndarray((self.num_of_spines, self.num_of_metrics), dtype="O")
+
+        for i, (spine_name, row) in enumerate(metrics.items()):
+            for j, metric in enumerate(row):
+                self._table[i, j] = metric
+
+    def row(self, spine_name: str) -> List[SpineMetric]:
+        return list(self._table[self._spine_2_row[spine_name], :])
+
+    def rows(self) -> List[SpineMetric]:
+        for row in self._table:
+            yield list(row)
+
+    def column(self, metric_name: str) -> List[SpineMetric]:
+        return self._table[:, self._metric_2_column[metric_name]]
+
+    @property
+    def spine_names(self) -> List[str]:
+        return list(self._spine_2_row.keys())
+
+    @property
+    def metric_names(self) -> List[str]:
+        return list(self._metric_2_column.keys())
+
+    def calculate_metrics(self, spine_meshes: Dict[str, Polyhedron_3],
+                          metric_names: List[str],
+                          params: List[Dict] = None) -> None:
+        metrics = {}
+        for (spine_name, spine_mesh) in spine_meshes.items():
+            metrics[spine_name] = calculate_metrics(spine_mesh, metric_names, params)
+        self.__init__(metrics)
+
+    def get_spines_subset(self, reduced_spine_names: List[str]) -> "SpineMetricDataset":
+        reduced_spines = {spine_name: self.row(spine_name) for spine_name in reduced_spine_names}
+        return SpineMetricDataset(reduced_spines)
+
+    def get_metrics_subset(self, reduced_metric_names: List[str]) -> "SpineMetricDataset":
+        index_subset = [self._metric_2_column[metric_name]
+                        for metric_name in reduced_metric_names]
+        reduced_metrics = {}
+        for (spine_name, spine_metrics) in zip(self.spine_names, self._table):
+            reduced_metrics[spine_name] = [spine_metrics[i] for i in index_subset]
+
+        return SpineMetricDataset(reduced_metrics)
+
+    def standardize(self) -> None:
+        float_metric_indices = [i for i in range(self.num_of_metrics)
+                                if isinstance(self._table[0, i], FloatSpineMetric)]
+
+        # calculate mean and std by column
+        mean = {}
+        std = {}
+        for i in float_metric_indices:
+            column_values = [metric.value for metric in self._table[:, i]]
+            mean[i] = np.mean(column_values)
+            std[i] = np.std(column_values)
+
+        for i in range(self.num_of_spines):
+            for j in float_metric_indices:
+                metric = self._table[i, j]
+                metric.value = (metric.value - mean[j]) / std[j]
+
+    def standardized(self) -> "SpineMetricDataset":
+        output = deepcopy(self)
+        output.standardize()
+        return output
+
+    def row_as_array(self, spine_name: str) -> np.array:
+        data = []
+        for spine_metric in self.row(spine_name):
+            data += spine_metric.value_as_list()
+        return np.asarray(data)
+
+    def as_array(self) -> np.ndarray:
+        data = [self.row_as_array(spine_name) for spine_name in self.spine_names]
+        return np.asarray(data)
+
+
+def get_metric_class(metric_name):
+    return globals()[metric_name + "SpineMetric"]
 
 
 def calculate_metrics(spine_mesh: Polyhedron_3,
@@ -83,23 +208,23 @@ def calculate_metrics(spine_mesh: Polyhedron_3,
 SPINE_FILE_FIELD = "Spine File"
 
 
-def save_metrics(metrics: Dict[str, List[SpineMetric]], filename: str) -> None:
+def save_metrics(metrics: SpineMetricDataset, filename: str) -> None:
     with open(filename, mode="w") as file:
-        if len(metrics) == 0:
+        if metrics.num_of_spines == 0:
             return
         # extract from metric names from first spine
-        metric_names = [metric.name for metric in list(metrics.values())[0]]
+        metric_names = metrics.metric_names
 
         # save metrics for each spine
         writer = csv.DictWriter(file, fieldnames=[SPINE_FILE_FIELD] + metric_names)
         writer.writeheader()
-        for spine_name in metrics.keys():
+        for spine_name in metrics.spine_names:
             writer.writerow({SPINE_FILE_FIELD: spine_name,
                              **{metric.name: metric.value
-                                for metric in metrics[spine_name]}})
+                                for metric in metrics.row(spine_name)}})
 
 
-def load_metrics(filename: str) -> Dict[str, List[SpineMetric]]:
+def load_metrics(filename: str) -> SpineMetricDataset:
     output = {}
     with open(filename, mode="r") as file:
         reader = csv.DictReader(file)
@@ -115,39 +240,38 @@ def load_metrics(filename: str) -> Dict[str, List[SpineMetric]]:
                     value = np.fromstring(value_str[1:-1], dtype="float", sep=" ")
                 else:
                     value = float(value_str)
-                metrics.append(ManualSpineMetric(metric_name, value))
+                klass = globals()[metric_name + "SpineMetric"]
+                metric = klass()
+                metric._value = value
+                metrics.append(metric)
             output[spine_name] = metrics
-    return output
+    return SpineMetricDataset(output)
 
 
 class FloatSpineMetric(SpineMetric, ABC):
-    def show(self):
-        return widgets.Label(f"{self.value:.2f}")
+    def show(self) -> widgets.Widget:
+        return widgets.Label(f"{self._value:.2f}")
+
+    @classmethod
+    def get_distribution(cls, metrics: List["SpineMetric"]) -> np.ndarray:
+        return np.asarray([metric.value for metric in metrics])
+
+    @classmethod
+    def _show_distribution(cls, metrics: List["SpineMetric"]) -> None:
+        plt.boxplot(cls.get_distribution(metrics))
 
 
 class AreaSpineMetric(FloatSpineMetric):
-    def __init__(self, spine_mesh: Polyhedron_3) -> None:
-        self.name = "Area"
-        super().__init__(spine_mesh)
-
     def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
         return area(spine_mesh)
 
 
 class VolumeSpineMetric(FloatSpineMetric):
-    def __init__(self, spine_mesh: Polyhedron_3) -> None:
-        self.name = "Volume"
-        super().__init__(spine_mesh)
-
     def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
-        return volume(spine_mesh)
+        return abs(volume(spine_mesh))
 
 
 class ConvexHullVolumeSpineMetric(FloatSpineMetric):
-    def __init__(self, spine_mesh: Polyhedron_3) -> None:
-        self.name = "Convex Hull Volume"
-        super().__init__(spine_mesh)
-
     def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
         hull_mesh = Polyhedron_3()
         convex_hull_3(spine_mesh.points(), hull_mesh)
@@ -155,14 +279,10 @@ class ConvexHullVolumeSpineMetric(FloatSpineMetric):
 
 
 class ConvexHullRatioSpineMetric(FloatSpineMetric):
-    def __init__(self, spine_mesh: Polyhedron_3) -> None:
-        self.name = "Convex Hull Ratio"
-        super().__init__(spine_mesh)
-
     def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
         hull_mesh = Polyhedron_3()
         convex_hull_3(spine_mesh.points(), hull_mesh)
-        v = volume(spine_mesh)
+        v = abs(volume(spine_mesh))
         return (volume(hull_mesh) - v) / v
 
 
@@ -172,15 +292,21 @@ class JunctionSpineMetric(FloatSpineMetric, ABC):
 
     @abstractmethod
     def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
+        # identify junction triangles
+        junction_triangles = set()
+        for v in spine_mesh.vertices():
+            if v.vertex_degree() > 15:
+                # mark adjacent triangles
+                for h in spine_mesh.halfedges():
+                    if h.vertex() == v:
+                        junction_triangles.add(h.facet())
+
         # calculate junction center
-        self._junction_center = Vector_3(0, 0, 0)
-        i = 0
-        for facet in spine_mesh.facets():
-            if facet.id() == 0:
+        if len(junction_triangles) > 0:
+            self._junction_center = Vector_3(0, 0, 0)
+            for facet in junction_triangles:
                 self._junction_center += _calculate_facet_center(facet)
-                i += 1
-        if i > 0:
-            self._junction_center /= i
+            self._junction_center /= len(junction_triangles)
         else:
             self._junction_center = _point_2_vec(spine_mesh.points().next())
 
@@ -203,40 +329,25 @@ class JunctionDistanceSpineMetric(JunctionSpineMetric, ABC):
 
 
 class AverageDistanceSpineMetric(JunctionDistanceSpineMetric):
-    def __init__(self, spine_mesh: Polyhedron_3) -> None:
-        self.name = "Average Distance"
-        super().__init__(spine_mesh)
-
     def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
         super()._calculate(spine_mesh)
         return np.mean(self._distances)
 
 
 class LengthSpineMetric(JunctionDistanceSpineMetric):
-    def __init__(self, spine_mesh: Polyhedron_3) -> None:
-        self.name = "Length"
-        super().__init__(spine_mesh)
-
     def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
         super()._calculate(spine_mesh)
-        return np.mean(self._distances[self._distances > np.quantile(self._distances, 0.95)])
+        q = np.quantile(self._distances, 0.95)
+        return np.mean([d for d in self._distances if d >= q])
 
 
 class CVDSpineMetric(JunctionDistanceSpineMetric):
-    def __init__(self, spine_mesh: Polyhedron_3) -> None:
-        self.name = "Coefficient of variation in distance"
-        super().__init__(spine_mesh)
-
     def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
         super()._calculate(spine_mesh)
         return np.std(self._distances, ddof=1) / np.mean(self._distances)
 
 
 class OpenAngleSpineMetric(JunctionSpineMetric):
-    def __init__(self, spine_mesh: Polyhedron_3) -> None:
-        self.name = "Open Angle"
-        super().__init__(spine_mesh)
-
     def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
         super()._calculate(spine_mesh)
 
@@ -248,34 +359,41 @@ class OpenAngleSpineMetric(JunctionSpineMetric):
         return angle_sum / len(self._surface_vectors)
 
 
-class OpenAngle(AverageDistanceSpineMetric):
-    def __init__(self, spine_mesh: Polyhedron_3) -> None:
-        self.name = "Coefficient of variation in distance"
-        super().__init__(spine_mesh)
-
-    def _calculate(self, spine_mesh: Polyhedron_3) -> Any:
-        super()._calculate(spine_mesh)
-        return np.std(self._distances, ddof=1) / np.mean(self._distances)
-
-
 class HistogramSpineMetric(SpineMetric):
     num_of_bins: int
     distribution: np.array
 
-    def __init__(self, spine_mesh: Polyhedron_3, num_of_bins: int = 10) -> None:
+    def __init__(self, spine_mesh: Polyhedron_3 = None, num_of_bins: int = 10) -> None:
         self.num_of_bins = num_of_bins
         super().__init__(spine_mesh)
 
-    def show(self):
+    @SpineMetric.value.setter
+    def value(self, new_value: List[float]) -> None:
+        self.num_of_bins = len(new_value)
+        self._value = new_value
+
+    def show(self) -> widgets.Widget:
         out = widgets.Output()
 
-        # get_ipython().magic("matplotlib inline")
-
         with out:
-            plt.hist(self.distribution, self.num_of_bins, density=True)
+            left_edges = [i / len(self._value) for i in range(len(self._value))]
+            width = 0.85 * (left_edges[1] - left_edges[0])
+            plt.bar(left_edges, self._value, align='edge', width=width)
             plt.show()
 
         return out
+
+    @classmethod
+    def get_distribution(cls, metrics: List["SpineMetric"]) -> np.ndarray:
+        histograms = np.asarray([metric.value for metric in metrics])
+        return np.mean(histograms, 0)
+
+    @classmethod
+    def _show_distribution(cls, metrics: List["SpineMetric"]) -> None:
+        value = cls.get_distribution(metrics)
+        left_edges = [i / len(value) for i in range(len(value))]
+        width = 0.85 * (left_edges[1] - left_edges[0])
+        plt.bar(left_edges, value, align='edge', width=width)
 
     @abstractmethod
     def _calculate_distribution(self, spine_mesh: Polyhedron_3) -> np.array:
@@ -292,9 +410,8 @@ class ChordDistributionSpineMetric(HistogramSpineMetric):
     chord_lengths: List[float]
     relative_max_facet_area: float
 
-    def __init__(self, spine_mesh: Polyhedron_3, num_of_chords: int = 3000,
+    def __init__(self, spine_mesh: Polyhedron_3 = None, num_of_chords: int = 3000,
                  num_of_bins: int = 100, relative_max_facet_area: float = 0.001) -> None:
-        self.name = "Chord Distribution"
         self.num_of_chords = num_of_chords
         self.relative_max_facet_area = relative_max_facet_area
         super().__init__(spine_mesh, num_of_bins)
@@ -462,11 +579,6 @@ class ChordDistributionSpineMetric(HistogramSpineMetric):
 
 
 class OldChordDistributionSpineMetric(ChordDistributionSpineMetric):
-    def __init__(self, spine_mesh: Polyhedron_3, num_of_chords: int = 3000,
-                 num_of_bins: int = 100, relative_max_facet_area: float = 0.001) -> None:
-        super().__init__(spine_mesh, num_of_chords, num_of_bins, relative_max_facet_area)
-        self.name = "Old Chord Distribution"
-
     def _subdivide_mesh(self, mesh: Polyhedron_3,
                         relative_max_facet_area: float = 0.001) -> Polyhedron_3:
         out: Polyhedron_3 = mesh.deepcopy()

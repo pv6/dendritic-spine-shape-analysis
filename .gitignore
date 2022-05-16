@@ -129,9 +129,12 @@ dmypy.json
 .pyre/
 
 # Generated artifacts
-output/*.tif
+output/
+*.tif
+*.png
 *.csv
 *.off
 *.json
 test/
+
 .idea/
