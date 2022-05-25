@@ -8,7 +8,8 @@ from CGAL.CGAL_Kernel import Point_3, Vector_3, Point_2
 from CGAL.CGAL_Point_set_3 import Point_set_3
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3, Polyhedron_3_Halfedge_handle, \
     Polyhedron_3_Vertex_handle, Polyhedron_3_Facet_handle, \
-    Polyhedron_3_Halfedge_around_facet_circulator, Polyhedron_3_Edge_iterator
+    Polyhedron_3_Halfedge_around_facet_circulator, Polyhedron_3_Edge_iterator, \
+    Polyhedron_3_Halfedge_around_vertex_circulator
 from CGAL.CGAL_Polygon_mesh_processing import Polylines, \
     remove_connected_components, keep_connected_components
 import json
@@ -400,35 +401,81 @@ def spines_to_segmentation(spines: List[Polyhedron_3]) -> Segmentation:
     return result
 
 
+def _find_edge_vertices(segmentation: Segmentation, mesh: Polyhedron_3) -> Set[Polyhedron_3_Vertex_handle]:
+    edge_vertices = set()
+    for v in mesh.vertices():
+        if not hash_point(v.point()) in segmentation:
+            continue
+        h = v.halfedge()
+        circulator: Polyhedron_3_Halfedge_around_vertex_circulator = h.vertex_begin()
+        begin = h.vertex_begin()
+        while circulator.hasNext():
+            h1: Polyhedron_3_Halfedge_handle = circulator.next()
+            v1 = h1.opposite().vertex()
+            if not hash_point(v1.point()) in segmentation:
+                edge_vertices.add(h.vertex())
+                break
+
+            # check for end of loop
+            if circulator == begin:
+                break
+    return edge_vertices
+
+
 def expand_segmentation(segmentation: Segmentation, mesh: Polyhedron_3,
                         wave_num: int) -> Segmentation:
     out = segmentation.copy()
 
+    edge_vertices = _find_edge_vertices(out, mesh)
+
     for i in range(wave_num):
         points_to_add = set()
-        for h in mesh.halfedges():
-            h1 = h.opposite()
-            if hash_point(h1.vertex().point()) in out:
-                points_to_add.add(hash_point(h.vertex().point()))
+        new_edge_vertices = set()
+        for v in edge_vertices:
+            h = v.halfedge()
+            circulator: Polyhedron_3_Halfedge_around_vertex_circulator = h.vertex_begin()
+            begin = h.vertex_begin()
+            while circulator.hasNext():
+                h1: Polyhedron_3_Halfedge_handle = circulator.next()
+                v1 = h1.opposite().vertex()
+                if not hash_point(v1.point()) in out:
+                    new_edge_vertices.add(v1)
+                    points_to_add.add(hash_point(v1.point()))
+                # check for end of loop
+                if circulator == begin:
+                    break
         out = out.union(points_to_add)
+        edge_vertices = new_edge_vertices
 
     return out
 
 
 def shrink_segmentation(segmentation: Segmentation, mesh: Polyhedron_3,
                         wave_num: int) -> Segmentation:
-    output = segmentation.copy()
+    out = segmentation.copy()
+
+    edge_vertices = _find_edge_vertices(out, mesh)
 
     for i in range(wave_num):
         points_to_remove = set()
-        for h in mesh.halfedges():
-            p_in = hash_point(h.vertex().point())
-            p_out = hash_point(h.opposite().vertex().point())
-            if p_in in output and p_out not in output:
-                points_to_remove.add(hash_point(h.vertex().point()))
-        output = output.difference(points_to_remove)
+        new_edge_vertices = set()
+        for v in edge_vertices:
+            points_to_remove.add(hash_point(v.point()))
+            h = v.halfedge()
+            circulator: Polyhedron_3_Halfedge_around_vertex_circulator = h.vertex_begin()
+            begin = h.vertex_begin()
+            while circulator.hasNext():
+                h1: Polyhedron_3_Halfedge_handle = circulator.next()
+                v1 = h1.opposite().vertex()
+                if hash_point(v1.point()) in out:
+                    new_edge_vertices.add(v1)
+                # check for end of loop
+                if circulator == begin:
+                    break
+        out = out.difference(points_to_remove)
+        edge_vertices = new_edge_vertices
 
-    return output
+    return out
 
 
 def correct_segmentation(segmentation: Segmentation, mesh: Polyhedron_3,
