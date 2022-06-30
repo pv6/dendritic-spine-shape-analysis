@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import List, Dict, Set, Tuple
+from typing import List, Dict, Set, Tuple, Iterable
 import networkx as nx
 import ast
 from scipy.ndimage import binary_erosion
@@ -10,7 +10,7 @@ from CGAL.CGAL_Polyhedron_3 import Polyhedron_3, Polyhedron_3_Halfedge_handle, \
     Polyhedron_3_Vertex_handle, Polyhedron_3_Facet_handle, \
     Polyhedron_3_Halfedge_around_facet_circulator, Polyhedron_3_Edge_iterator
 from CGAL.CGAL_Polygon_mesh_processing import Polylines, \
-    remove_connected_components, keep_connected_components
+    remove_connected_components, keep_connected_components, area
 import json
 from scipy.ndimage.filters import median_filter
 from tifffile import imsave, imread
@@ -392,7 +392,7 @@ def load_segmentation(filename: str) -> Segmentation:
         return output
 
 
-def spines_to_segmentation(spines: List[Polyhedron_3]) -> Segmentation:
+def spines_to_segmentation(spines: Iterable[Polyhedron_3]) -> Segmentation:
     result: Segmentation = set()
     for spine in spines:
         for point in spine.points():

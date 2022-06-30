@@ -3,6 +3,7 @@ from typing import List, Iterable, Tuple, Union, Callable, Any, Set
 from ipywidgets import widgets
 from matplotlib import pyplot as plt
 from sklearn.cluster import DBSCAN, KMeans
+from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics import silhouette_score
 from scipy.spatial.distance import euclidean
 import numpy as np
@@ -29,16 +30,20 @@ class SpineClusterizer(ABC):
         self.metric = metric
         self.dataset = SpineMetricDataset({})
 
-    def get_cluster(self, index: int) -> List[int]:
-        return [i for i, x in enumerate(self.cluster_masks[index]) if x]
-
-    def get_clusters(self) -> List[List[str]]:
-        output = []
+    def get_cluster(self, index: int) -> Set[str]:
         names = self.dataset.spine_names
-        for mask in self.cluster_masks:
-            cluster = [names[i] for i, is_in in enumerate(mask) if is_in]
-            output.append(cluster)
-        return output
+        mask = self.cluster_masks[index]
+        return {names[j] for j, is_in in enumerate(mask) if is_in}
+
+    def get_clusters(self) -> List[Set[str]]:
+        return [self.get_cluster(i) for i in range(self.num_of_clusters)]
+
+    def get_noise_cluster(self) -> Set[str]:
+        clusters = self.get_clusters()
+        all_names = set(self.dataset.spine_names)
+        for cluster in clusters:
+            all_names = all_names.difference(cluster)
+        return all_names
 
     def get_labels(self) -> List[int]:
         output = [-1] * self.sample_size
@@ -61,7 +66,8 @@ class SpineClusterizer(ABC):
 
         self._data = spine_metrics.as_array()
         if self.pca_dim != -1:
-            self._data = PCA(self.pca_dim).fit_transform(self._data)
+            pca = PCA(self.pca_dim)
+            self._data = pca.fit_transform(self._data)
 
         self.reduced_data = PCA(2).fit_transform(self._data)
 
@@ -73,8 +79,10 @@ class SpineClusterizer(ABC):
         if self.num_of_clusters < 2 or self.sample_size - 1 < self.num_of_clusters:
             return float("nan")
         labels = self.get_labels()
-        return silhouette_score(self._data, labels, metric=self.metric)
-        # return silhouette_score(self._data, labels, metric="euclidean")
+        return self._score(self._data, labels, metric=self.metric)
+
+    def _score(self, data, labels, metric):
+        return silhouette_score(data, labels, metric=metric)
 
     @abstractmethod
     def _fit(self, data: np.array) -> object:
@@ -88,9 +96,12 @@ class SpineClusterizer(ABC):
 
         return out
 
+    def get_colors(self) -> List[Tuple[float, float, float, float]]:
+        return [plt.cm.Spectral(each) for each in
+                np.linspace(0, 1, self.num_of_clusters)]
+
     def _show(self, clusters: Set[int] = None) -> None:
-        colors = [plt.cm.Spectral(each) for each in
-                  np.linspace(0, 1, len(self.cluster_masks))]
+        colors = self.get_colors()
         for i, (mask, color) in enumerate(zip(self.cluster_masks, colors)):
             if clusters is not None and i not in clusters:
                 color = [0.69, 0.69, 0.69, 1]
@@ -114,9 +125,13 @@ class SpineClusterizer(ABC):
 
     def get_representative_samples(self, cluster_index: int,
                                    num_of_samples: int = 4,
-                                   distance: Callable = euclidean) -> List[int]:
+                                   distance: Callable = euclidean) -> List[str]:
+        if distance is None:
+            distance = euclidean
+        
         # get spines in cluster
-        spine_indices = self.get_cluster(cluster_index)
+        spine_names = self.get_cluster(cluster_index)
+        spine_indices = [self.dataset.get_row_index(name) for name in spine_names]
         num_of_samples = min(num_of_samples, len(spine_indices))
         spines = self.reduced_data[spine_indices]
         # calculate center (mean reduced data)
@@ -126,9 +141,10 @@ class SpineClusterizer(ABC):
         for (spine, index) in zip(spines, spine_indices):
             distances[index] = distance(center, spine)
         # sort spines by distance
-        spine_indices.sort(key=lambda index: distances[index])
-        # return first N spines
-        return spine_indices[:num_of_samples]
+        output = list(zip(spine_names, spine_indices))
+        output.sort(key=lambda name_index: distances[name_index[1]])
+        # return first N spine names
+        return [name_index[0] for name_index in output[:num_of_samples]]
 
 
 class ManualSpineClusterizer(SpineClusterizer):
@@ -155,6 +171,7 @@ def load_clusterization(filename: str) -> SpineClusterizer:
 
 class SKLearnSpineClusterizer(SpineClusterizer, ABC):
     _fit_data: object
+    _clusterizer: object
 
     def _fit(self, data: np.array) -> None:
         self._fit_data = self._sklearn_fit(data)
@@ -178,7 +195,7 @@ def ks_test(x: np.ndarray, y: np.ndarray) -> float:
         sum_y += y[i]
         output = max(output, abs(sum_x - sum_y))
 
-    return output / x.size
+    return output / x.size / 100
 
 
 def chi_square_distance(x: np.ndarray, y: np.ndarray) -> float:
@@ -212,17 +229,29 @@ class DBSCANSpineClusterizer(SKLearnSpineClusterizer):
 
     def score(self) -> float:
         # TODO: change nan to something sensical
-        # if self.num_of_noise / self.sample_size > 0.15 or self.num_of_clusters < 2 or self.sample_size - self.num_of_noise - 1 < self.num_of_clusters:
-        if self.num_of_clusters < 2 or self.sample_size - self.num_of_noise - 1 < self.num_of_clusters:
+        if self.num_of_noise / self.sample_size > 0.69 or self.num_of_clusters < 2 or self.sample_size - self.num_of_noise - 1 < self.num_of_clusters:
+        # if self.num_of_clusters < 2 or self.sample_size - self.num_of_noise - 1 < self.num_of_clusters:
             return float("nan")
         labels = self.get_labels()
         indices_to_delete = np.argwhere(np.asarray(labels) == -1)
         filtered_data = np.delete(self._data, indices_to_delete, 0)
         filtered_labels = np.delete(labels, indices_to_delete, 0)
-        return silhouette_score(filtered_data, filtered_labels, metric=self.metric)
+        return self._score(filtered_data, filtered_labels, self.metric)
+
+    # def _score(self, data, labels, metric):
+    #     neigh = NearestNeighbors(n_neighbors=2, metric=metric)
+    #     nbrs = neigh.fit(self._data)
+    #     distances, indices = nbrs.kneighbors(self._data)
+    #     distances = -np.sort(-distances, axis=0)
+    #     distances = distances[:, 1]
+    #     for i in range(len(distances)):
+    #         if self.eps > distances[i]:
+    #             return i
+    #     return len(distances)
 
     def _sklearn_fit(self, data: np.array) -> object:
-        clusterized = DBSCAN(eps=self.eps, min_samples=self.min_samples, metric=self.metric).fit(data)
+        self._clusterizer = DBSCAN(eps=self.eps, min_samples=self.min_samples, metric=self.metric)
+        clusterized = self._clusterizer.fit(data)
 
         # Number of clusters in labels, ignoring noise if present.
         labels = clusterized.labels_
@@ -231,20 +260,26 @@ class DBSCANSpineClusterizer(SKLearnSpineClusterizer):
 
         return clusterized
 
+    def get_colors(self) -> List[Tuple[float, float, float, float]]:
+        colors = [plt.cm.Spectral(each) for each in
+                  np.linspace(0, 1, len(self.cluster_masks))]
+        labels = self._fit_data.labels_
+        for i, k in enumerate(set(labels)):
+            if k == -1:
+                # Black used for noise.
+                colors[i] = [0, 0, 0, 1]
+                break
+        return colors
+
     def _show(self, clusters: Set[int] = None) -> None:
         core_samples_mask = np.zeros_like(self._fit_data.labels_, dtype=bool)
         core_samples_mask[self._fit_data.core_sample_indices_] = True
 
         # Black removed and is used for noise instead.
-        colors = [plt.cm.Spectral(each) for each in
-                  np.linspace(0, 1, len(self.cluster_masks))]
+        colors = self.get_colors()
         
         labels = self._fit_data.labels_
         for k, col in zip(set(labels), colors):
-            if k == -1:
-                # Black used for noise.
-                col = [0, 0, 0, 1]
-
             class_member_mask = labels == k
 
             xy = self.reduced_data[class_member_mask & core_samples_mask]
@@ -275,9 +310,13 @@ class DBSCANSpineClusterizer(SKLearnSpineClusterizer):
 
 
 class KMeansSpineClusterizer(SKLearnSpineClusterizer):
-    def __init__(self, num_of_clusters: int, pca_dim: int = -1):
-        super().__init__(pca_dim=pca_dim)
+    def __init__(self, num_of_clusters: int, pca_dim: int = -1, metric="euclidean"):
+        super().__init__(pca_dim=pca_dim, metric=metric)
         self.num_of_clusters = num_of_clusters
 
     def _sklearn_fit(self, data: np.array) -> object:
-        return KMeans(n_clusters=self.num_of_clusters, random_state=0).fit(data)
+        self._clusterizer = KMeans(n_clusters=self.num_of_clusters, random_state=0)
+        return self._clusterizer.fit(data)
+
+    # def _score(self, data, labels, metric):
+    #     return self._clusterizer.inertia_
