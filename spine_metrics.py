@@ -132,8 +132,8 @@ class SpineMetricDataset:
         return self._table[:, self._metric_2_column[metric_name]]
 
     @property
-    def spine_names(self) -> List[str]:
-        return list(self._spine_2_row.keys())
+    def spine_names(self) -> Set[str]:
+        return set(self._spine_2_row.keys())
 
     @property
     def metric_names(self) -> List[str]:
@@ -170,7 +170,8 @@ class SpineMetricDataset:
         index_subset = [self._metric_2_column[metric_name]
                         for metric_name in reduced_metric_names]
         reduced_metrics = {}
-        for (spine_name, spine_metrics) in zip(self.spine_names, self._table):
+        for spine_name in self.spine_names:
+            spine_metrics = self.row(spine_name)
             reduced_metrics[spine_name] = [spine_metrics[i] for i in index_subset]
 
         return SpineMetricDataset(reduced_metrics)
