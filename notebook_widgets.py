@@ -5,6 +5,7 @@ from ipywidgets import widgets
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3
 from CGAL.CGAL_Kernel import Vector_3, Point_3
 from typing import List, Tuple, Dict, Set, Iterable
+from spine_fitter import SpineGrouping
 from spine_segmentation import point_2_list, list_2_point, hash_point, \
     Segmentation, segmentation_by_distance, local_threshold_3d,\
     spines_to_segmentation, correct_segmentation, get_spine_meshes, apply_scale
@@ -53,6 +54,10 @@ class SpineMeshDataset:
 
         # calculate 'meshplot' mesh representations
         self._calculate_v_f()
+
+    @property
+    def spine_names(self) -> Set[str]:
+        return set(self.spine_meshes.keys())
 
     def get_dendrite_mesh(self, spine_name: str) -> Polyhedron_3:
         return self.dendrite_meshes[self.spine_to_dendrite[spine_name]]
@@ -293,7 +298,7 @@ class SpinePreview:
                                     GRAY, self.spine_color)
         # spine view colors
         self._spine_colors = np.ndarray((self.spine_mesh.size_of_vertices(), 3))
-        self._spine_colors[:] = YELLOW
+        self._spine_colors[:] = self.spine_color
 
     def _get_dendrite_colors(self):
         return self._dendrite_colors
@@ -888,7 +893,7 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
         # display(widgets.VBox([widgets.HBox([clusterizer.show(), score_graph]),
         #                       new_clusterization_widget(clusterizer, spine_meshes)]))
         # display(widgets.VBox([widgets.HBox([clusterizer.show(), score_graph])]))
-        display(widgets.VBox([widgets.HBox([clusterizer.show(spine_metrics), score_graph]),
+        display(widgets.VBox([widgets.HBox([clusterizer.grouping.show(spine_metrics), score_graph]),
                               clusterization_widget(clusterizer, spine_dataset, spine_metrics),
                               # new_new_clusterization_widget(clusterizer, spine_dataset),
                               # new_clusterization_widget(clusterizer, spine_dataset.spine_v_f),
@@ -969,5 +974,60 @@ def cluster_metric_distribution_widget(clusterizer: SpineClusterizer,
     return widgets.HBox(metric_distributions, layout=widgets.Layout(width='3000px'))
 
 
-def widget() -> widgets.Widget:
-    pass
+def manual_classification_widget(meshes: SpineMeshDataset,
+                                 metrics: SpineMetricDataset,
+                                 classes: Iterable[str],
+                                 initial_classification: SpineGrouping = None) -> widgets.Widget:
+    if initial_classification is None:
+        initial_classification = SpineGrouping(meshes.spine_names,
+                                               {class_name: set() for class_name in classes})
+    result_grouping = initial_classification
+    colors = result_grouping.colors
+
+    spine_names_list = list(meshes.spine_names)
+    unclassified = result_grouping.outlier_group
+    spine_names_list.sort(key=lambda x: x not in unclassified)
+
+    spine_name = [""]
+
+    def class_button_callback(button: widgets.Button) -> None:
+        class_name = button.description
+
+        # remove spine from current class
+        current_class = result_grouping.get_group(spine_name[0])
+        if current_class is not None:
+            result_grouping.groups[current_class].remove(spine_name[0])
+
+        # add spine to new class
+        result_grouping.groups[class_name].add(spine_name[0])
+
+        # move to next spine
+        spine_index_slider.value += 1
+
+    # create classification buttons
+    class_buttons = []
+    for class_name in classes:
+        button = widgets.Button(description=class_name)
+        b = [int(c * 255) for c in colors[class_name]]
+        c = (b[0] << 16) + (b[1] << 8) + b[2]
+        button.style.button_color = "#" + hex(c)[2:]
+        button.style.text_color = "#FFFFFF"
+        button.on_click(class_button_callback)
+        class_buttons.append(button)
+    class_buttons_box = widgets.HBox(class_buttons)
+
+    def show_spine(spine_index: int) -> SpineGrouping:
+        spine_name[0] = spine_names_list[spine_index]
+        name = spine_name[0] 
+        display(SpinePreview(meshes.spine_meshes[name], meshes.get_dendrite_v_f(name),
+                             metrics.row(name), name,
+                             result_grouping.get_color(name)[:3]).widget)
+        return result_grouping
+
+    spine_index_slider = widgets.IntSlider(max=max(0, len(spine_names_list) - 1))
+    spine_classification = widgets.interactive(show_spine, spine_index=spine_index_slider)
+
+    navigation_buttons = _make_navigation_widget(spine_index_slider)
+
+    return widgets.VBox([widgets.VBox([class_buttons_box, navigation_buttons]),
+                         spine_classification])
