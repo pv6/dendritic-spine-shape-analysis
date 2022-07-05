@@ -203,25 +203,26 @@ def _segmentation_to_colors(vertices: np.ndarray,
     return colors
 
 
-def _clusterization_to_colors(vertices: np.ndarray,
-                              spine_meshes: MeshDataset,
-                              clusterizer: SpineClusterizer,
-                              dendrite_color: Tuple[float, float, float] = GREEN) -> np.ndarray:
-    # generate segmentation for each cluster
-    cluster_segmentations = []
-    noise_cluster = clusterizer.noise_cluster
-    for cluster in clusterizer.clusters:
-        cluster_segmentations.append(spines_to_segmentation([spine_meshes[name] for name in cluster]))
-    cluster_segmentations.append(spines_to_segmentation([spine_meshes[name] for name in noise_cluster]))
+def _grouping_to_colors(vertices: np.ndarray,
+                        spine_meshes: MeshDataset,
+                        grouping: SpineGrouping,
+                        dendrite_color: Tuple[float, float, float] = GREEN) -> np.ndarray:
+    # generate segmentation for each group
+    group_segmentations = []
+    outlier_group = grouping.outlier_group
+    group_colors = []
+    for (group_label, group) in grouping.groups.items():
+        group_segmentations.append(spines_to_segmentation([spine_meshes[name] for name in group]))
+        group_colors.append(grouping.colors[group_label])
+    group_segmentations.append(spines_to_segmentation([spine_meshes[name] for name in outlier_group]))
+    group_colors.append(BLACK)
 
-    # for each vertex check if belongs to cluster
+    # for each vertex check if belongs to group
     colors = np.ndarray((vertices.shape[0], 3))
-    cluster_colors = clusterizer.grouping.colors
-    cluster_colors.append(BLACK)
     for i, vertex in enumerate(vertices):
         hp = hash_point(list_2_point(vertex))
         colors[i] = dendrite_color
-        for segmentation, color in zip(cluster_segmentations, cluster_colors):
+        for segmentation, color in zip(group_segmentations, group_colors):
             if hp in segmentation:
                 colors[i] = color[:3]
                 break
@@ -787,18 +788,23 @@ def clusterization_widget(clusterizer: SpineClusterizer,
 #                                              cluster_index=cluster_slider)])
 
 
-def new_new_clusterization_widget(clusterizer: SpineClusterizer,
+def new_new_clusterization_widget(grouping: SpineGrouping,
                                   spine_dataset: SpineMeshDataset) -> widgets.Widget:
     colors = {}
 
     def show_dendrite_by_name(dendrite_name: str):
         if dendrite_name not in colors:
-            colors[dendrite_name] = _clusterization_to_colors(
+            colors[dendrite_name] = _grouping_to_colors(
                 spine_dataset.dendrite_v_f[dendrite_name][0],
                 spine_dataset.spine_meshes,
-                clusterizer)
-        display(make_viewer(*spine_dataset.dendrite_v_f[dendrite_name],
-                            colors[dendrite_name])._renderer)
+                grouping)
+
+        viewer = make_viewer(*spine_dataset.dendrite_v_f[dendrite_name],
+                             colors[dendrite_name])
+        # for spine_name in spine_dataset.dendrite_to_spines[dendrite_name]:
+        #     viewer.add_mesh(*spine_dataset.spine_v_f[spine_name])
+
+        display(viewer._renderer)
 
     dendrite_name_dropdown = widgets.Dropdown(
         options=list(spine_dataset.dendrite_meshes.keys()),
