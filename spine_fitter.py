@@ -73,13 +73,13 @@ class SpineGrouping:
         group_label = self.get_group(spine_name)
         if group_label is not None:
             return self.colors[group_label]
-        return 0.30, 0.30, 0.30, 1
+        return 0.0, 1, 1, 1
 
     def show(self, metrics: SpineMetricDataset,
-             groups_to_show: Set[int] = None) -> widgets.Widget:
+             groups_to_show: Set[int] = None, outliers_label: str = "Outliers") -> widgets.Widget:
         out = widgets.Output()
         with out:
-            self._show(metrics, groups_to_show)
+            self._show(metrics, groups_to_show, outliers_label)
             plt.show()
 
         return out
@@ -90,7 +90,7 @@ class SpineGrouping:
         plt.clf()
 
     def _show(self, metrics: SpineMetricDataset,
-              groups_to_show: Set[Any] = None) -> None:
+              groups_to_show: Set[Any] = None, outliers_label: str = "Outliers") -> None:
         def show_group(group_label: Any, group: Set[str],
                        color: Tuple[float, float, float, float]) -> None:
             xy = reduced_data[[metrics.get_row_index(name) for name in group]]
@@ -115,7 +115,7 @@ class SpineGrouping:
             color = colors[group_label] if group_label in groups_to_show else [
                 0.69, 0.69, 0.69, 1]
             show_group(group_label, group, color)
-        show_group("Outliers", self.outlier_group, (0, 0, 0, 1))
+        show_group(outliers_label, self.outlier_group, (0, 0, 0, 1))
 
         plt.title(f"Number of groups: {self.num_of_groups}")
         plt.legend(loc="upper right")
