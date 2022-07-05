@@ -135,7 +135,7 @@ def list_2_point(coords: List[float]) -> Point_3:
     return Point_3(float(coords[0]), float(coords[1]), float(coords[2]))
 
 
-def hash_point(point: Point_3, decimals: int = 5) -> str:
+def hash_point(point: Point_3, decimals: int = 2) -> str:
     return str(np.around(np.asarray(point_2_list(point)),
                          decimals=decimals).tolist())
 
