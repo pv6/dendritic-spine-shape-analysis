@@ -13,9 +13,11 @@ from matplotlib import pyplot as plt
 import csv
 from CGAL.CGAL_Convex_hull_3 import convex_hull_3
 from copy import deepcopy
+from sklearn.decomposition import PCA
 
 
 MeshDataset = Dict[str, Polyhedron_3]
+LineSet = List[Tuple[Point_3, Point_3]]
 
 
 def _calculate_facet_center(facet: Polyhedron_3_Facet_handle) -> Vector_3:
@@ -96,6 +98,8 @@ class SpineMetric(ABC):
 
 
 class SpineMetricDataset:
+    SPINE_FILE_FIELD = "Spine File"
+
     num_of_spines: int
     num_of_metrics: int
     spine_meshes: MeshDataset
@@ -132,6 +136,12 @@ class SpineMetricDataset:
         return self._table[:, self._metric_2_column[metric_name]]
 
     @property
+    def ordered_spine_names(self) -> List[str]:
+        name_row = list(self._spine_2_row.items())
+        name_row.sort(key=lambda n_r: n_r[1])
+        return [n_r[0] for n_r in name_row]
+
+    @property
     def spine_names(self) -> Set[str]:
         return set(self._spine_2_row.keys())
 
@@ -166,7 +176,7 @@ class SpineMetricDataset:
         reduced_spines = {spine_name: self.row(spine_name) for spine_name in reduced_spine_names}
         return SpineMetricDataset(reduced_spines)
 
-    def get_metrics_subset(self, reduced_metric_names: List[str]) -> "SpineMetricDataset":
+    def get_metrics_subset(self, reduced_metric_names: Iterable[str]) -> "SpineMetricDataset":
         index_subset = [self._metric_2_column[metric_name]
                         for metric_name in reduced_metric_names]
         reduced_metrics = {}
@@ -205,8 +215,72 @@ class SpineMetricDataset:
         return np.asarray(data)
 
     def as_array(self) -> np.ndarray:
-        data = [self.row_as_array(spine_name) for spine_name in self.spine_names]
+        data = [self.row_as_array(spine_name) for spine_name in self.ordered_spine_names]
         return np.asarray(data)
+
+    def as_reduced_array(self, n_components: int = 2) -> np.ndarray:
+        return PCA(n_components).fit_transform(self.as_array())
+
+    def pca(self, n_components: int = 2) -> "SpineMetricDataset":
+        pca_metrics = {spine_name: [] for spine_name in self.spine_names}
+        reduced_data = self.as_reduced_array(n_components)
+        ordered_names = self.ordered_spine_names
+        for i, spine_name in enumerate(ordered_names):
+            for j in range(n_components):
+                conv = ManualFloatSpineMetric(reduced_data[i, j], f"PC{j + 1}")
+                pca_metrics[spine_name].append(conv)
+        return SpineMetricDataset(pca_metrics)
+
+    def save_as_array(self, filename) -> None:
+        with open(filename, mode="w") as file:
+            if self.num_of_spines == 0:
+                return
+            # extract from metric names from first spine
+            metric_names = self.metric_names
+
+            # save metrics for each spine
+            writer = csv.writer(file)
+            for spine_name in self.spine_names:
+                writer.writerow([spine_name] + list(self.row_as_array(spine_name)))
+
+    def save(self, filename: str) -> None:
+        with open(filename, mode="w") as file:
+            if self.num_of_spines == 0:
+                return
+            # extract from metric names from first spine
+            metric_names = self.metric_names
+
+            # save metrics for each spine
+            writer = csv.DictWriter(file, fieldnames=[self.SPINE_FILE_FIELD] + metric_names)
+            writer.writeheader()
+            for spine_name in self.spine_names:
+                writer.writerow({self.SPINE_FILE_FIELD: spine_name,
+                                 **{metric.name: metric.value
+                                    for metric in self.row(spine_name)}})
+
+    def load(self, filename: str) -> "SpineMetricDataset":
+        output = {}
+        with open(filename, mode="r") as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                # extract spine file name
+                spine_name = row.pop(self.SPINE_FILE_FIELD)
+                # extract each metric
+                metrics = []
+                for metric_name in row.keys():
+                    value_str = row[metric_name]
+                    value: Any
+                    if value_str[0] == "[":
+                        value = np.fromstring(value_str[1:-1], dtype="float", sep=" ")
+                    else:
+                        value = float(value_str)
+                    klass = globals()[metric_name + "SpineMetric"]
+                    metric = klass()
+                    metric._value = value
+                    metrics.append(metric)
+                output[spine_name] = metrics
+        self.__init__(output)
+        return self
 
 
 def get_metric_class(metric_name):
@@ -223,49 +297,6 @@ def calculate_metrics(spine_mesh: Polyhedron_3,
         klass = globals()[name + "SpineMetric"]
         out.append(klass(spine_mesh, **params[i]))
     return out
-
-
-SPINE_FILE_FIELD = "Spine File"
-
-
-def save_metrics(metrics: SpineMetricDataset, filename: str) -> None:
-    with open(filename, mode="w") as file:
-        if metrics.num_of_spines == 0:
-            return
-        # extract from metric names from first spine
-        metric_names = metrics.metric_names
-
-        # save metrics for each spine
-        writer = csv.DictWriter(file, fieldnames=[SPINE_FILE_FIELD] + metric_names)
-        writer.writeheader()
-        for spine_name in metrics.spine_names:
-            writer.writerow({SPINE_FILE_FIELD: spine_name,
-                             **{metric.name: metric.value
-                                for metric in metrics.row(spine_name)}})
-
-
-def load_metrics(filename: str) -> SpineMetricDataset:
-    output = {}
-    with open(filename, mode="r") as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            # extract spine file name
-            spine_name = row.pop(SPINE_FILE_FIELD)
-            # extract each metric
-            metrics = []
-            for metric_name in row.keys():
-                value_str = row[metric_name]
-                value: Any
-                if value_str[0] == "[":
-                    value = np.fromstring(value_str[1:-1], dtype="float", sep=" ")
-                else:
-                    value = float(value_str)
-                klass = globals()[metric_name + "SpineMetric"]
-                metric = klass()
-                metric._value = value
-                metrics.append(metric)
-            output[spine_name] = metrics
-    return SpineMetricDataset(output)
 
 
 class FloatSpineMetric(SpineMetric, ABC):
@@ -451,20 +482,20 @@ class HistogramSpineMetric(SpineMetric):
     def _calculate(self, spine_mesh: Polyhedron_3) -> np.array:
         self.distribution = self._calculate_distribution(spine_mesh)
         return np.histogram(self.distribution, bins=self.num_of_bins,
-                            range=(0, 5), density=True)[0]
+                            range=(0, 1), density=True)[0]
 
 
 class ChordDistributionSpineMetric(HistogramSpineMetric):
     num_of_chords: int
-    chords: List[Tuple[Point_3, Point_3]]
+    chords: LineSet
     chord_lengths: List[float]
-    relative_max_facet_area: float
-
     def __init__(self, spine_mesh: Polyhedron_3 = None, num_of_chords: int = 3000,
                  num_of_bins: int = 100, relative_max_facet_area: float = 0.001) -> None:
         self.num_of_chords = num_of_chords
         self.relative_max_facet_area = relative_max_facet_area
         super().__init__(spine_mesh, num_of_bins)
+
+    relative_max_facet_area: float
 
     @staticmethod
     def _get_incident_halfedges(facet_halfedge: Polyhedron_3_Halfedge_handle) -> List[Polyhedron_3_Halfedge_handle]:
@@ -622,9 +653,9 @@ class ChordDistributionSpineMetric(HistogramSpineMetric):
         #                           Point_3(min_coord[0] + x * step[0], min_coord[1] + y * step[1], max_coord[2]))
         #         self._calculate_raycast(ray_query, tree)
 
-        # max_len = np.max(self.chord_lengths)
-        # self.chord_lengths = np.asarray(self.chord_lengths) / max_len
-        self.chord_lengths = np.asarray(self.chord_lengths)
+        max_len = np.max(self.chord_lengths)
+        self.chord_lengths = np.asarray(self.chord_lengths) / max_len
+        # self.chord_lengths = np.asarray(self.chord_lengths)
 
         return self.chord_lengths
 

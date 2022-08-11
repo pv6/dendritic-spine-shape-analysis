@@ -63,7 +63,7 @@ class SKLearnSpineClusterizer(SpineClusterizer, ABC):
                 continue
             names_array = np.array(names)
             cluster_names = names_array[self._labels == cluster_index]
-            self.grouping.groups[cluster_index] = set(cluster_names)
+            self.grouping.groups[cluster_index + 1] = set(cluster_names)
 
     @abstractmethod
     def _sklearn_fit(self, data: np.ndarray) -> object:
@@ -79,7 +79,7 @@ def ks_test(x: np.ndarray, y: np.ndarray) -> float:
         sum_y += y[i]
         output = max(output, abs(sum_x - sum_y))
 
-    return output / x.size / 100
+    return output
 
 
 def chi_square_distance(x: np.ndarray, y: np.ndarray) -> float:
