@@ -186,7 +186,7 @@ class SpineGrouping:
 
     def get_color(self, spine_name: str) -> Tuple[float, float, float, float]:
         group_label = self.get_group(spine_name)
-        if group_label is not None:
+        if group_label != self.outliers_label:
             return self.colors[group_label]
         return 0.0, 1, 1, 1
 

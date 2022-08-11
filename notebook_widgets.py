@@ -1025,7 +1025,8 @@ def manual_classification_widget(meshes: SpineMeshDataset,
                                  initial_classification: SpineGrouping = None) -> widgets.Widget:
     if initial_classification is None:
         initial_classification = SpineGrouping(meshes.spine_names,
-                                               {class_name: set() for class_name in classes})
+                                               {class_name: set() for class_name in classes},
+                                               "Unclassified")
     result_grouping = initial_classification
     colors = result_grouping.colors
 
