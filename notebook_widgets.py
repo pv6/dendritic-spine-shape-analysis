@@ -1214,8 +1214,18 @@ def spine_dataset_view_widget(spine_dataset: SpineMeshDataset,
     return widgets.interactive(show_spine_by_name, spine_name=spine_names_dropdown)
 
 
-def spine_chords_widget(spine_mesh: Polyhedron_3, num_of_chords: int = 3000,
-                        num_of_bins = 100) -> widgets.Widget:
-    chord_metric = OldChordDistributionSpineMetric(spine_mesh, num_of_chords, num_of_bins)
-    show_line_set(chord_metric.chords, spine_mesh)
-    display(chord_metric.show())
+def spine_chords_widget(spine_dataset: SpineMeshDataset, num_of_chords: int = 3000,
+                        num_of_bins: int = 100) -> widgets.Widget:
+    def show_spine_by_name(spine_name: str):
+        spine_mesh = spine_dataset.spine_meshes[spine_name]
+        chord_metric = OldChordDistributionSpineMetric(spine_mesh, num_of_chords, num_of_bins)
+        show_line_set(chord_metric.chords, spine_mesh)
+        display(chord_metric.show())
+
+    names = list(spine_dataset.spine_names)
+    names.sort()
+    spine_names_dropdown = widgets.Dropdown(options=names,
+                                            description="Spine:")
+    return widgets.interactive(show_spine_by_name, spine_name=spine_names_dropdown)
+
+
