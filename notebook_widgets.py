@@ -22,6 +22,7 @@ from sklearn.linear_model import LinearRegression
 from functools import cmp_to_key
 from spine_clusterization import ks_test
 from CGAL.CGAL_Polygon_mesh_processing import Polylines
+from CGAL.CGAL_Surface_mesh_skeletonization import surface_mesh_skeletonization
 
 
 RED = (1, 0, 0)
@@ -73,6 +74,10 @@ class SpineMeshDataset:
     @property
     def spine_names(self) -> Set[str]:
         return set(self.spine_meshes.keys())
+
+    @property
+    def dendrite_names(self) -> Set[str]:
+        return set(self.dendrite_meshes.keys())
 
     def get_dendrite_mesh(self, spine_name: str) -> Polyhedron_3:
         return self.dendrite_meshes[self.spine_to_dendrite[spine_name]]
@@ -163,23 +168,32 @@ def show_polylines(polylines: Polylines, mesh: Polyhedron_3 = None) -> None:
     show_line_set(polylines_to_line_set(polylines), mesh)
 
 
+def _add_line_set_to_viewer(viewer: mp.Viewer, lines: LineSet) -> None:
+    viewer.add_lines(np.array([point_2_list(line[0]) for line in lines]),
+                     np.array([point_2_list(line[1]) for line in lines]),
+                     shading={"line_color": "red"})
+
+
+def _add_mesh_to_viewer_as_wireframe(viewer: mp.Viewer, mesh_v_f: V_F) -> None:
+    (v, f) = mesh_v_f
+    starts = []
+    ends = []
+    for facet in f:
+        starts.append(v[facet[0]])
+        starts.append(v[facet[1]])
+        starts.append(v[facet[2]])
+        ends.append(v[facet[1]])
+        ends.append(v[facet[2]])
+        ends.append(v[facet[0]])
+    viewer.add_lines(np.array(starts), np.array(ends),
+                     shading={"line_color": "gray"})
+
+
 def show_line_set(lines: LineSet, mesh: Polyhedron_3 = None) -> None:
     view = mp.Viewer({})
-    view.add_lines(np.array([point_2_list(line[0]) for line in lines]),
-                   np.array([point_2_list(line[1]) for line in lines]),
-                   shading={"line_color": "red"})
+    _add_line_set_to_viewer(view, lines)
     if mesh:
-        v, f = _mesh_to_v_f(mesh)
-        starts = []
-        ends = []
-        for facet in f:
-            starts.append(v[facet[0]])
-            starts.append(v[facet[1]])
-            starts.append(v[facet[2]])
-            ends.append(v[facet[1]])
-            ends.append(v[facet[2]])
-            ends.append(v[facet[0]])
-        view.add_lines(np.array(starts), np.array(ends), shading={"line_color": "gray"})
+        _add_mesh_to_viewer_as_wireframe(view, mesh)
     display(view._renderer)
 
 
@@ -1077,7 +1091,7 @@ def manual_classification_widget(meshes: SpineMeshDataset,
                          spine_classification])
 
 
-def intersection_ratios_mean_distance(a: SpineGrouping, b: SpineGrouping) -> float:
+def intersection_ratios_mean_distance(a: SpineGrouping, b: SpineGrouping, normalize: bool = True) -> float:
     intersections = a.intersection_ratios(b)
 
     a_labels = list(intersections.keys())
@@ -1096,10 +1110,10 @@ def intersection_ratios_mean_distance(a: SpineGrouping, b: SpineGrouping) -> flo
     return mean_distance
 
 
-def grouping_intersection_widget(a: SpineGrouping, b: SpineGrouping) -> widgets.Widget:
-    intersections = a.intersection_ratios(b)
+def grouping_intersection_widget(a: SpineGrouping, b: SpineGrouping, normalize: bool = True) -> widgets.Widget:
+    intersections = a.intersection_ratios(b, normalize)
 
-    print(intersection_ratios_mean_distance(a, b))
+    print(intersection_ratios_mean_distance(a, b, normalize))
 
     # generate pie charts
     b_colors = b.colors_with_outliers
@@ -1215,18 +1229,76 @@ def spine_dataset_view_widget(spine_dataset: SpineMeshDataset,
     return widgets.interactive(show_spine_by_name, spine_name=spine_names_dropdown)
 
 
-def spine_chords_widget(spine_dataset: SpineMeshDataset, num_of_chords: int = 3000,
+def spine_chords_widget(spine_dataset: SpineMeshDataset, scaled_spine_dataset: SpineMeshDataset,
+                        dataset_path: str, num_of_chords: int = 3000,
                         num_of_bins: int = 100) -> widgets.Widget:
+    chord_metrics = {}
+
+    # metrics = SpineMetricDataset()
+    # metrics.calculate_metrics(spine_dataset.spine_meshes, ["OldChordDistribution"],
+    #                           [{"num_of_chords": num_of_chords, "num_of_bins": num_of_bins}])
+
     def show_spine_by_name(spine_name: str):
-        spine_mesh = spine_dataset.spine_meshes[spine_name]
-        chord_metric = OldChordDistributionSpineMetric(spine_mesh, num_of_chords, num_of_bins)
-        show_line_set(chord_metric.chords, spine_mesh)
-        display(chord_metric.show())
+        # chord_metric = metrics.row(spine_name)[0]
+        if spine_name in chord_metrics:
+            chord_metric = chord_metrics[spine_name]
+        else:
+            chord_metric = OldChordDistributionSpineMetric(spine_dataset.spine_meshes[spine_name],
+                                                           num_of_chords=num_of_chords, num_of_bins=num_of_bins)
+            chord_metrics[spine_name] = [chord_metric]
+        # chord_metric = metrics.row(spine_name)[0]
+
+        view = mp.Viewer({})
+        _add_line_set_to_viewer(view, chord_metric.chords)
+        _add_mesh_to_viewer_as_wireframe(view, scaled_spine_dataset.spine_v_f[spine_name])
+
+        display(widgets.HBox([view._renderer, chord_metric.show()]))
+
+    def export_callback(button: widgets.Button) -> None:
+        save_path = f"{dataset_path}/chords_{num_of_chords}_chords_{num_of_bins}_bins.csv"
+        # metrics.save_as_array(save_path)
+        SpineMetricDataset(chord_metrics).save_as_array(save_path)
+        print(f"Saved histograms to \"{save_path}\"")
+
+    export_button = widgets.Button(description="Export Histograms")
+    export_button.on_click(export_callback)
 
     names = list(spine_dataset.spine_names)
     names.sort()
     spine_names_dropdown = widgets.Dropdown(options=names,
                                             description="Spine:")
-    return widgets.interactive(show_spine_by_name, spine_name=spine_names_dropdown)
+    return widgets.VBox([widgets.interactive(show_spine_by_name, spine_name=spine_names_dropdown), export_button])
 
+
+def view_skeleton_widget(scaled_spine_dataset: SpineMeshDataset) -> widgets.Widget:
+    def show_dendrite_by_name(dendrite_name: str):
+        dendrite_mesh = scaled_spine_dataset.dendrite_meshes[dendrite_name]
+        dendrite_v_f = scaled_spine_dataset.dendrite_v_f[dendrite_name]
+
+        # get skeleton
+        skeleton_polylines = Polylines()
+        correspondence_polylines = Polylines()
+        surface_mesh_skeletonization(dendrite_mesh, skeleton_polylines,
+                                     correspondence_polylines)
+
+        # make viewers
+        w = 600
+        h = 600
+
+        mesh_viewer = make_viewer(*scaled_spine_dataset.dendrite_v_f[dendrite_name], width=w, height=h)
+        skeleton_viewer = mp.Viewer({"width": w, "height": h})
+        skeleton_line_set = polylines_to_line_set(skeleton_polylines)
+        _add_line_set_to_viewer(skeleton_viewer, skeleton_line_set)
+        skeleton_mesh_viewer = mp.Viewer({"width": w, "height": h})
+        _add_line_set_to_viewer(skeleton_mesh_viewer, polylines_to_line_set(skeleton_polylines))
+        _add_mesh_to_viewer_as_wireframe(skeleton_mesh_viewer, dendrite_v_f)
+
+        display(widgets.HBox([mesh_viewer._renderer, skeleton_viewer._renderer,
+                              skeleton_mesh_viewer._renderer]))
+
+    names = list(scaled_spine_dataset.dendrite_names)
+    names.sort()
+    dendrite_names_dropdown = widgets.Dropdown(options=names, description="Dendrite:")
+    
+    return widgets.interactive(show_dendrite_by_name, dendrite_name=dendrite_names_dropdown)
 
