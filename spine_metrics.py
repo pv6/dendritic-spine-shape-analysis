@@ -137,9 +137,12 @@ class SpineMetricDataset:
 
     @property
     def ordered_spine_names(self) -> List[str]:
-        name_row = list(self._spine_2_row.items())
-        name_row.sort(key=lambda n_r: n_r[1])
-        return [n_r[0] for n_r in name_row]
+        names = list(self.spine_names)
+        names.sort()
+        return names
+        # name_row = list(self._spine_2_row.items())
+        # name_row.sort(key=lambda n_r: n_r[1])
+        # return [n_r[0] for n_r in name_row]
 
     @property
     def spine_names(self) -> Set[str]:
@@ -168,9 +171,6 @@ class SpineMetricDataset:
         for spine_name in self.spine_names:
             metrics[spine_name].append(metric_values[spine_name])
         self.__init__(metrics)
-
-    def get_row_index(self, spine_name: str) -> int:
-        return self._spine_2_row[spine_name]
 
     def get_spines_subset(self, reduced_spine_names: Iterable[str]) -> "SpineMetricDataset":
         reduced_spines = {spine_name: self.row(spine_name) for spine_name in reduced_spine_names}
@@ -288,10 +288,9 @@ def get_metric_class(metric_name):
 
 
 def calculate_metrics(spine_mesh: Polyhedron_3,
-                      metric_names: List[str], params: List[Dict] = None) -> List[SpineMetric]:
+                      metric_names: List[str], params: List[Dict[str, Any]] = None) -> List[SpineMetric]:
     if params is None:
-        params = [{}] * len(metric_names)
-
+        params = {}
     out = []
     for i, name in enumerate(metric_names):
         klass = globals()[name + "SpineMetric"]

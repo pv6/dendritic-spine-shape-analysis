@@ -767,41 +767,33 @@ def grouping_widget(grouping: SpineGrouping,
                     spine_dataset: SpineMeshDataset,
                     metrics_dataset: SpineMetricDataset,
                     distance_metric=None) -> widgets.Widget:
-    spine_previews_by_cluster = {}
+    # TODO: show only representative spines?
+    spine_previews_by_cluster = {label: {} for label in grouping.group_labels}
     colors = grouping.colors
-    for label in grouping.groups.keys():
-        spine_previews_by_cluster[label] = []
-        # cluster = clusterizer.get_representative_samples(index, 10, distance_metric)
-        cluster = list(grouping.groups[label])[:4]
-        sample_number = min(4, len(cluster))
-        cluster = cluster[:sample_number]
-        for spine_name in cluster:
-            spine_previews_by_cluster[label].append(
-                SpinePreview(spine_dataset.spine_meshes[spine_name],
-                             spine_dataset.spine_v_f[spine_name],
-                             spine_dataset.get_dendrite_v_f(spine_name),
-                             metrics_dataset.row(spine_name),
-                             spine_name, colors[label][:3]))
 
-    def show_spine_by_cluster(group_label_str: str):
-        def show_spine_by_index(index: int):
+    def show_spine_by_cluster(label: str):
+        def show_spine_by_name(spine_name: str):
+            if spine_name not in spine_previews_by_cluster[label]:
+                preview = SpinePreview(spine_dataset.spine_meshes[spine_name],
+                                       spine_dataset.spine_v_f[spine_name],
+                                       spine_dataset.get_dendrite_v_f(
+                                           spine_name),
+                                       metrics_dataset.row(spine_name),
+                                       spine_name, colors[label][:3])
+                spine_previews_by_cluster[label][spine_name] = preview
+
             # keeping old views caused bugs when switching between spines
             # this sacrifices saving camera position but oh well
-            label = str_to_label[group_label_str]
-            spine_previews_by_cluster[label][index].create_views()
-            display(spine_previews_by_cluster[label][index].widget)
-        slider = widgets.IntSlider(min=0, max=len(spine_previews_by_cluster[label]) - 1)
-        navigation_buttons = _make_navigation_widget(slider)
-        display(widgets.VBox([navigation_buttons,
-                              widgets.interactive(show_spine_by_index,
-                                                  index=slider)]))
+            spine_previews_by_cluster[label][spine_name].create_views()
+            display(spine_previews_by_cluster[label][spine_name].widget)
+        spine_name_dropdown = widgets.Dropdown(options=grouping.get_sorted_group(label),
+                                               description="Spine:")
+        display(widgets.interactive(show_spine_by_name, spine_name=spine_name_dropdown))
 
-    str_to_label = {str(label): label for label in grouping.groups.keys()}
-
-    group_label_dropdown = widgets.Dropdown(options=list(str_to_label.keys()),
+    group_label_dropdown = widgets.Dropdown(options=grouping.sorted_group_labels,
                                             description="Group:")
 
-    return widgets.interactive(show_spine_by_cluster, group_label_str=group_label_dropdown)
+    return widgets.interactive(show_spine_by_cluster, label=group_label_dropdown)
 
 
 # def new_clusterization_widget(clusterizer: SpineClusterizer,
@@ -884,7 +876,9 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                  param_min_value, param_max_value, param_step,
                                  static_params: Dict,
                                  score_function: Callable[[SpineClusterizer], float],
-                                 use_pca: bool = True) -> widgets.Widget:
+                                 use_pca: bool = True,
+                                 classification: SpineGrouping = None,
+                                 filename_prefix: str = "") -> widgets.Widget:
     # calculate score graph
     pca_dim = 2 if use_pca else -1
 
@@ -941,17 +935,23 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
             # plt.rcParams["figure.figsize"] = (10, 10)
             plt.show()
 
-        # display(widgets.VBox([widgets.HBox([clusterizer.show(), score_graph]),
-        #                       new_clusterization_widget(clusterizer, spine_meshes)]))
-        # display(widgets.VBox([widgets.HBox([clusterizer.show(), score_graph])]))
+        # export clusterization button
+        def export_clusterization(_: widgets.Button):
+            create_dir("output")
+            create_dir("output/clusterization/")
+            save_path = f"output/clusterization/{filename_prefix}_{param_name}={param_value}_pca={clusterizer.pca_dim}_{clusterizer.grouping.num_of_groups}_clusters.json"
+            clusterizer.grouping.save(save_path)
+            print(f"Saved clusterization to \"{save_path}\".")
+
+        export_button = widgets.Button(description="Export Clusterization")
+        export_button.on_click(export_clusterization)
+
+        # clusterization inspector
+        inspector = inspect_grouping_widget(clusterizer.grouping, spine_dataset, spine_metrics,
+                                            every_spine_metrics, classification)
+
         display(widgets.VBox([widgets.HBox([clusterizer.grouping.show(spine_metrics), score_graph]),
-                              # grouping_widget(clusterizer.grouping, spine_dataset, spine_metrics),
-                              # new_new_clusterization_widget(clusterizer, spine_dataset),
-                              # new_clusterization_widget(clusterizer, spine_dataset.spine_v_f),
-                              # representative_clusterization_widget(clusterizer, spine_v_f, 5),
-                              cluster_metric_distribution_widget(clusterizer, every_spine_metrics)
-                              ]))
-        # display(widgets.VBox([widgets.HBox([widgets.VBox([clusterizer.show(), clusterizer_pca.show()]), score_graph])]))
+                              export_button, inspector]))
 
     clusterization_result = widgets.interactive(show_clusterization,
                                                 param_value=param_slider)
@@ -968,13 +968,16 @@ def k_means_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                          min_num_of_clusters: int = 2,
                                          max_num_of_clusters: int = 20,
                                          metric="euclidean",
-                                         use_pca: bool = True) -> widgets.Widget:
+                                         use_pca: bool = True,
+                                         classification: SpineGrouping = None,
+                                         filename_prefix: str = "") -> widgets.Widget:
     return clustering_experiment_widget(spine_metrics, every_spine_metrics,
                                         spine_dataset,
                                         KMeansSpineClusterizer,
                                         widgets.IntSlider, "num_of_clusters",
                                         min_num_of_clusters, max_num_of_clusters,
-                                        1, {"metric": metric}, score_function, use_pca)
+                                        1, {"metric": metric}, score_function,
+                                        use_pca, classification, f"{filename_prefix}_kmeans")
 
 
 def dbscan_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
@@ -985,40 +988,42 @@ def dbscan_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                         min_eps: float = 2,
                                         max_eps: float = 20,
                                         eps_step: float = 0.1,
-                                        use_pca: bool = True) -> widgets.Widget:
+                                        use_pca: bool = True,
+                                        classification: SpineGrouping = None,
+                                        filename_prefix: str = "") -> widgets.Widget:
     return clustering_experiment_widget(spine_metrics, every_spine_metrics,
                                         spine_dataset,
                                         DBSCANSpineClusterizer,
                                         widgets.FloatSlider, "eps",
                                         min_eps, max_eps, eps_step,
-                                        {"metric": metric}, score_function, use_pca)
+                                        {"metric": metric}, score_function,
+                                        use_pca, classification, f"{filename_prefix}_dbscan")
 
 
-def cluster_metric_distribution_widget(clusterizer: SpineClusterizer,
-                                       metrics: SpineMetricDataset) -> widgets.Widget:
+def grouping_metric_distribution_widget(grouping: SpineGrouping,
+                                        metrics: SpineMetricDataset) -> widgets.Widget:
     metric_distributions = []
     for metric in metrics.row(list(metrics.spine_names)[0]):
         distribution_graph = widgets.Output()
         with distribution_graph:
             data = []
-            colors = clusterizer.grouping.colors
-            for i, cluster in clusterizer.grouping.groups.items():
+            colors = grouping.colors
+            for label, cluster in grouping.groups.items():
                 cluster_metrics = metrics.get_spines_subset(cluster)
                 metric_column = cluster_metrics.column(metric.name)
                 data.append(metric.get_distribution(metric_column))
                 if issubclass(metric.__class__, HistogramSpineMetric):
                     value = metric.get_distribution(metric_column)
-                    left_edges = [(i - 1) + j / len(value) for j in range(len(value))]
+                    left_edges = [(int(label) - 1) + j / len(value) for j in range(len(value))]
                     width = left_edges[1] - left_edges[0]
-                    plt.bar(left_edges, value, align='edge', width=width, color=colors[i])
+                    plt.bar(left_edges, value, align='edge', width=width, color=colors[label])
             if issubclass(metric.__class__, FloatSpineMetric):
                 plt.boxplot(data)
             plt.title(metric.name)
             plt.show()
         metric_distributions.append(distribution_graph)
 
-    slider = widgets.IntSlider(min=0, max=max(0, len(metric_distributions) - 1))
-
+    # slider = widgets.IntSlider(min=0, max=max(0, len(metric_distributions) - 1))
     # navigation_buttons = _make_navigation_widget(slider)
     # return widgets.VBox([navigation_buttons,
     #                      widgets.interactive(lambda index: display(metric_distributions[index]),
@@ -1092,7 +1097,7 @@ def manual_classification_widget(meshes: SpineMeshDataset,
 
 
 def intersection_ratios_mean_distance(a: SpineGrouping, b: SpineGrouping, normalize: bool = True) -> float:
-    intersections = a.intersection_ratios(b)
+    intersections = a.intersection_ratios(b, normalize)
 
     a_labels = list(intersections.keys())
     b_labels = list(b.group_labels_with_outliers)
@@ -1113,7 +1118,9 @@ def intersection_ratios_mean_distance(a: SpineGrouping, b: SpineGrouping, normal
 def grouping_intersection_widget(a: SpineGrouping, b: SpineGrouping, normalize: bool = True) -> widgets.Widget:
     intersections = a.intersection_ratios(b, normalize)
 
-    print(intersection_ratios_mean_distance(a, b, normalize))
+    # calculate mean distance
+    mean_distance = intersection_ratios_mean_distance(a, b, normalize)
+    mean_distance_label = widgets.Label(f"Mean distance b/w distributions: {mean_distance:.2f}")
 
     # generate pie charts
     b_colors = b.colors_with_outliers
@@ -1140,9 +1147,11 @@ def grouping_intersection_widget(a: SpineGrouping, b: SpineGrouping, normalize: 
             fig.gca().add_artist(centre_circle)
             plt.show()
         pie_charts[a_label] = pie_chart_widget
-        
-    return widgets.HBox([widgets.VBox([widgets.Label(f"{a_label}:"), pie_chart_widget])
-                         for a_label, pie_chart_widget in pie_charts.items()])
+
+    all_charts_widget = widgets.HBox([widgets.VBox([widgets.Label(f"{a_label}:"), pie_chart_widget])
+                                      for a_label, pie_chart_widget in pie_charts.items()])
+
+    return widgets.VBox([mean_distance_label, all_charts_widget])
 
     # # generate table
     # for class_label in class_labels:
@@ -1298,3 +1307,41 @@ def view_skeleton_widget(scaled_spine_dataset: SpineMeshDataset) -> widgets.Widg
     dendrite_names_dropdown = widgets.Dropdown(options=names, description="Dendrite:")
     
     return widgets.interactive(show_dendrite_by_name, dendrite_name=dendrite_names_dropdown)
+
+def inspect_grouping_widget(grouping: SpineGrouping, spine_dataset: SpineMeshDataset,
+                            metrics_dataset: SpineMetricDataset, all_metrics_dataset: SpineMetricDataset,
+                            reference_grouping: SpineGrouping) -> widgets.Widget:
+    inspectors = {}
+    inspector_names = ["Metric Distribution", "Reference Grouping Intersection",
+                       "View Spines in 3D"]
+
+    def generate_inspector(inspector_index) -> widgets.Widget:
+        if inspector_index == 0:
+            return grouping_metric_distribution_widget(grouping, all_metrics_dataset)
+        elif inspector_index == 1:
+            if reference_grouping is not None:
+                intersection_widgets = [
+                    widgets.Label("-- Clusters Over Classes --"),
+                    grouping_intersection_widget(grouping, reference_grouping, False),
+                    widgets.Label("-- Classes Over Clusters, Non-normalized --"),
+                    grouping_intersection_widget(reference_grouping, grouping, False),
+                    widgets.Label("-- Clusters Over Classes, Normalized --"),
+                    grouping_intersection_widget(reference_grouping, grouping, True)
+                ]
+            else:
+                intersection_widgets = []
+            return widgets.VBox(intersection_widgets)
+        elif inspector_index == 2:
+            return grouping_widget(grouping, spine_dataset, metrics_dataset)
+
+    def show_inspector(inspector_index):
+        if inspector_index not in inspectors:
+            inspectors[inspector_index] = generate_inspector(inspector_index)
+        display(inspectors[inspector_index])
+
+    inspector_dropdown = widgets.Dropdown(
+        options=[(name, i) for i, name in enumerate(inspector_names)])
+
+    # return widgets.VBox([grouping.show(metrics_dataset),
+    #                      widgets.interactive(show_inspector, inspector_index=inspector_dropdown)])
+    return widgets.interactive(show_inspector, inspector_index=inspector_dropdown)

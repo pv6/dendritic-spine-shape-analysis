@@ -1,5 +1,5 @@
 from spine_metrics import SpineMetricDataset
-from typing import List, Tuple, Set, Dict, Any, Iterable
+from typing import List, Tuple, Set, Dict, Iterable
 from ipywidgets import widgets
 from matplotlib import pyplot as plt
 import numpy as np
@@ -10,12 +10,12 @@ import random
 
 
 class SpineGrouping:
-    groups: Dict[Any, Set[str]]
+    groups: Dict[str, Set[str]]
     samples: Set[str]
-    outliers_label: Any
+    outliers_label: str
 
-    def __init__(self, samples: Iterable[str] = None, groups: Dict[Any, Set[str]] = None,
-                 outliers_label: Any = None):
+    def __init__(self, samples: Iterable[str] = None, groups: Dict[str, Set[str]] = None,
+                 outliers_label: str = None):
         if groups is None:
             groups = {}
         if samples is None:
@@ -31,8 +31,14 @@ class SpineGrouping:
         return len(self.groups)
 
     @property
-    def group_labels(self) -> Set[Any]:
+    def group_labels(self) -> Set[str]:
         return set(self.groups.keys())
+
+    @property
+    def sorted_group_labels(self) -> List[str]:
+        labels = list(self.groups.keys())
+        labels.sort()
+        return labels
 
     @property
     def outlier_group(self) -> Set[str]:
@@ -50,7 +56,7 @@ class SpineGrouping:
         return len(self.samples)
 
     @property
-    def colors(self) -> Dict[Any, Tuple[float, float, float, float]]:
+    def colors(self) -> Dict[str, Tuple[float, float, float, float]]:
         label_each = zip(self.groups.keys(),
                          np.linspace(0, 1, self.num_of_groups))
         return {group_label: plt.cm.Spectral(each)
@@ -69,10 +75,15 @@ class SpineGrouping:
         return output
 
     @property
-    def colors_with_outliers(self) -> Dict[Any, Tuple[float, float, float, float]]:
+    def colors_with_outliers(self) -> Dict[str, Tuple[float, float, float, float]]:
         output = self.colors
         output[self.outliers_label] = (0.3, 0.3, 0.3, 1)
         return output
+
+    def get_sorted_group(self, group_label: str) -> List[str]:
+        spine_names = list(self.groups[group_label])
+        spine_names.sort()
+        return spine_names
 
     def get_spines_subset(self, spine_names: Iterable[str]) -> "SpineGrouping":
         groups = {label: set() for label in self.group_labels}
@@ -80,7 +91,7 @@ class SpineGrouping:
             groups[self.get_group(spine)].add(spine)
         return SpineGrouping(spine_names, groups)
 
-    def get_groups_subset(self, group_labels: Iterable[Any]) -> "SpineGrouping":
+    def get_groups_subset(self, group_labels: Iterable[str]) -> "SpineGrouping":
         groups = {}
         for label in group_labels:
             groups[label] = self.groups[label]
@@ -167,18 +178,22 @@ class SpineGrouping:
     def save(self, filename: str) -> None:
         with open(filename, "w") as file:
             json.dump({"groups": {label: list(group) for (label, group) in self.groups.items()},
-                       "samples": list(self.samples)}, file)
+                       "samples": list(self.samples), "outliers_label": self.outliers_label}, file)
 
     def load(self, filename: str) -> "SpineGrouping":
         with open(filename) as file:
             loaded = json.load(file)
             self.samples = set(loaded["samples"])
             self.groups = loaded["groups"]
+            if "outliers_label" in loaded:
+                self.outliers_label = loaded["outliers_label"]
+            else:
+                self.outliers_label = None
             for (key, group) in self.groups.items():
                 self.groups[key] = set(group)
         return self
 
-    def get_group(self, spine_name: str) -> Any:
+    def get_group(self, spine_name: str) -> str:
         for group_label, group in self.groups.items():
             if spine_name in group:
                 return group_label
@@ -204,11 +219,10 @@ class SpineGrouping:
         plt.savefig(filename)
         plt.clf()
 
-    def _show(self, metrics: SpineMetricDataset,
-              groups_to_show: Set[Any] = None) -> None:
-        def show_group(group_label: Any, group: Set[str],
+    def _show(self, metrics: SpineMetricDataset, groups_to_show: Set[str] = None) -> None:
+        def show_group(group_label: str, group: Set[str],
                        color: Tuple[float, float, float, float]) -> None:
-            xy = reduced_data[[metrics.get_row_index(name) for name in group]]
+            xy = reduced_data[[name_to_index[name] for name in group]]
             if xy.size > 0:
                 plt.plot(
                     xy[:, 0],
@@ -229,6 +243,7 @@ class SpineGrouping:
             metrics = metrics.pca(2)
 
         reduced_data = metrics.as_array()
+        name_to_index = {name: i for i, name in enumerate(metrics.ordered_spine_names)}
 
         for (group_label, group) in self.groups.items():
             color = colors[group_label] if group_label in groups_to_show else [
@@ -260,14 +275,25 @@ class SpineGrouping:
 
         return SpineGrouping(new_samples, new_groups)
 
-    def intersection_ratios(self, other: "SpineGrouping") -> Dict[str, Dict[str, float]]:
+    def intersection_ratios(self, other: "SpineGrouping", normalize: bool = True) -> Dict[str, Dict[str, float]]:
         intersections = {}
         for i, (self_label, self_group) in enumerate(self.groups_with_outliers.items()):
             if len(self_group) == 0:
                 continue
             intersections[self_label] = {}
             for j, (other_label, other_group) in enumerate(other.groups_with_outliers.items()):
-                intersections[self_label][other_label] = len(self_group.intersection(other_group)) / len(self_group)
+                if len(other_group) == 0:
+                    value = 0
+                else:
+                    value = len(self_group.intersection(other_group)) / len(self_group)
+                    if normalize:
+                        value /= len(other_group)
+                intersections[self_label][other_label] = value
+            if normalize:
+                intersection_sum = sum(value for value in intersections[self_label].values())
+                for other_label in intersections[self_label].keys():
+                    intersections[self_label][other_label] /= intersection_sum
+
         return intersections
 
 
@@ -311,7 +337,7 @@ class SpineFitter(ABC):
 
         self.grouping.samples = spine_metrics.spine_names
 
-        self._fit(data, list(spine_metrics.spine_names))
+        self._fit(data, spine_metrics.ordered_spine_names)
 
     @abstractmethod
     def _fit(self, data: np.array, names: List[str]) -> object:
