@@ -1233,30 +1233,27 @@ def spine_chords_widget(spine_dataset: SpineMeshDataset, scaled_spine_dataset: S
                         dataset_path: str, num_of_chords: int = 3000,
                         num_of_bins: int = 100) -> widgets.Widget:
     chord_metrics = {}
-
-    # metrics = SpineMetricDataset()
-    # metrics.calculate_metrics(spine_dataset.spine_meshes, ["OldChordDistribution"],
-    #                           [{"num_of_chords": num_of_chords, "num_of_bins": num_of_bins}])
+    scaled_chord_metrics = {}
 
     def show_spine_by_name(spine_name: str):
-        # chord_metric = metrics.row(spine_name)[0]
         if spine_name in chord_metrics:
             chord_metric = chord_metrics[spine_name]
+            scaled_chord_metric = scaled_chord_metrics[spine_name]
         else:
             chord_metric = OldChordDistributionSpineMetric(spine_dataset.spine_meshes[spine_name],
                                                            num_of_chords=num_of_chords, num_of_bins=num_of_bins)
             chord_metrics[spine_name] = [chord_metric]
-        # chord_metric = metrics.row(spine_name)[0]
-
+            scaled_chord_metric = OldChordDistributionSpineMetric(scaled_spine_dataset.spine_meshes[spine_name],
+                                                                  num_of_chords=num_of_chords, num_of_bins=num_of_bins)
+            scaled_chord_metrics[spine_name] = [chord_metric]
         view = mp.Viewer({})
-        _add_line_set_to_viewer(view, chord_metric.chords)
+        _add_line_set_to_viewer(view, scaled_chord_metric.chords)
         _add_mesh_to_viewer_as_wireframe(view, scaled_spine_dataset.spine_v_f[spine_name])
 
         display(widgets.HBox([view._renderer, chord_metric.show()]))
 
-    def export_callback(button: widgets.Button) -> None:
+    def export_callback(_: widgets.Button) -> None:
         save_path = f"{dataset_path}/chords_{num_of_chords}_chords_{num_of_bins}_bins.csv"
-        # metrics.save_as_array(save_path)
         SpineMetricDataset(chord_metrics).save_as_array(save_path)
         print(f"Saved histograms to \"{save_path}\"")
 
@@ -1301,4 +1298,3 @@ def view_skeleton_widget(scaled_spine_dataset: SpineMeshDataset) -> widgets.Widg
     dendrite_names_dropdown = widgets.Dropdown(options=names, description="Dendrite:")
     
     return widgets.interactive(show_dendrite_by_name, dendrite_name=dendrite_names_dropdown)
-
