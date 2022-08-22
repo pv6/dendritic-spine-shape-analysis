@@ -1060,7 +1060,7 @@ def manual_classification_widget(meshes: SpineMeshDataset,
 
         # remove spine from current class
         current_class = result_grouping.get_group(spine_name[0])
-        if current_class is not None:
+        if current_class != result_grouping.outliers_label:
             result_grouping.groups[current_class].remove(spine_name[0])
 
         # add spine to new class
@@ -1307,6 +1307,7 @@ def view_skeleton_widget(scaled_spine_dataset: SpineMeshDataset) -> widgets.Widg
     dendrite_names_dropdown = widgets.Dropdown(options=names, description="Dendrite:")
     
     return widgets.interactive(show_dendrite_by_name, dendrite_name=dendrite_names_dropdown)
+
 
 def inspect_grouping_widget(grouping: SpineGrouping, spine_dataset: SpineMeshDataset,
                             metrics_dataset: SpineMetricDataset, all_metrics_dataset: SpineMetricDataset,
