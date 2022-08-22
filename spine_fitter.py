@@ -88,8 +88,10 @@ class SpineGrouping:
     def get_spines_subset(self, spine_names: Iterable[str]) -> "SpineGrouping":
         groups = {label: set() for label in self.group_labels}
         for spine in spine_names:
-            groups[self.get_group(spine)].add(spine)
-        return SpineGrouping(spine_names, groups)
+            label = self.get_group(spine)
+            if label != self.outliers_label:
+                groups[label].add(spine)
+        return SpineGrouping(spine_names, groups, self.outliers_label)
 
     def get_groups_subset(self, group_labels: Iterable[str]) -> "SpineGrouping":
         groups = {}
