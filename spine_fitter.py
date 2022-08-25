@@ -102,7 +102,7 @@ class SpineGrouping:
     def remove_samples(self, samples_to_removes: Set[str]):
         for sample in samples_to_removes:
             label = self.get_group(sample)
-            if label is not None:
+            if label != self.outliers_label:
                 self.groups[label].remove(sample)
         self.samples = self.samples.difference(samples_to_removes)
 
@@ -123,10 +123,10 @@ class SpineGrouping:
         # determine group for each sample
         if len(merged.groups) > 0:
             for spine_name in merged.samples:
-                votes = {label: 0 for label in merged.group_labels}
+                votes = {label: 0 for label in merged.group_labels_with_outliers}
                 for grouping in groupings:
                     label = grouping.get_group(spine_name)
-                    if label is not None or can_vote_outlier:
+                    if label != grouping.outliers_label or can_vote_outlier:
                         votes[label] += 1
                 votes_sorted = [(label, vote_num) for (label, vote_num) in votes.items()]
                 votes_sorted.sort(key=lambda label_vn: label_vn[1], reverse=True)
@@ -150,8 +150,9 @@ class SpineGrouping:
                 for label in true_grouping.group_labels}
 
     @staticmethod
-    def merge(groupings: Iterable["SpineGrouping"], can_vote_outlier: bool = False) -> "SpineGrouping":
-        merged = SpineGrouping()
+    def merge(groupings: Iterable["SpineGrouping"], can_vote_outlier: bool = False,
+              outliers_label: str = None) -> "SpineGrouping":
+        merged = SpineGrouping(outliers_label=outliers_label)
 
         # merged samples is union of samples from each grouping
         merged.samples = set().union(*[grouping.samples for grouping in groupings])
@@ -164,15 +165,15 @@ class SpineGrouping:
         # determine group for each sample
         if len(merged.groups) > 0:
             for spine_name in merged.samples:
-                votes = {label: 0 for label in merged.group_labels}
+                votes = {label: 0 for label in merged.group_labels_with_outliers}
                 for grouping in groupings:
                     label = grouping.get_group(spine_name)
-                    if label is not None or can_vote_outlier:
+                    if label != grouping.outliers_label or can_vote_outlier:
                         votes[label] += 1
                 votes_sorted = [(label, vote_num) for (label, vote_num) in votes.items()]
                 votes_sorted.sort(key=lambda label_vn: label_vn[1], reverse=True)
                 most_voted_label = votes_sorted[0][0]
-                if most_voted_label is not None:
+                if most_voted_label != merged.outliers_label:
                     merged.groups[most_voted_label].add(spine_name)
 
         return merged

@@ -143,6 +143,11 @@ def create_dir(dir_name: str) -> None:
         pass
 
 
+def remove_file(file_path: str) -> None:
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+
 def preprocess_meshes(spine_meshes: MeshDataset) -> Dict[str, V_F]:
     output = {}
     for (spine_name, spine_mesh) in spine_meshes.items():
