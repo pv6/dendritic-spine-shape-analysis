@@ -173,6 +173,7 @@ class SpineMetricDataset:
         self.__init__(metrics)
 
     def get_spines_subset(self, reduced_spine_names: Iterable[str]) -> "SpineMetricDataset":
+        reduced_spine_names = set(reduced_spine_names).intersection(self.spine_names)
         reduced_spines = {spine_name: self.row(spine_name) for spine_name in reduced_spine_names}
         return SpineMetricDataset(reduced_spines)
 

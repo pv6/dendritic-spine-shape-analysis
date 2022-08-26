@@ -86,6 +86,7 @@ class SpineGrouping:
         return spine_names
 
     def get_spines_subset(self, spine_names: Iterable[str]) -> "SpineGrouping":
+        spine_names = set(spine_names).intersection(self.samples)
         groups = {label: set() for label in self.group_labels}
         for spine in spine_names:
             label = self.get_group(spine)
