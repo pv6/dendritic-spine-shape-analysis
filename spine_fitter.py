@@ -1,5 +1,5 @@
 from spine_metrics import SpineMetricDataset
-from typing import List, Tuple, Set, Dict, Iterable
+from typing import List, Tuple, Set, Dict, Iterable, Callable
 from ipywidgets import widgets
 from matplotlib import pyplot as plt
 import numpy as np
@@ -7,6 +7,7 @@ from sklearn.decomposition import PCA
 from abc import ABC, abstractmethod
 import json
 import random
+from scipy.spatial.distance import euclidean
 
 
 class SpineGrouping:
@@ -256,7 +257,7 @@ class SpineGrouping:
         show_group(self.outliers_label, self.outlier_group, (0, 0, 0, 1))
 
         plt.title(f"Number of groups: {self.num_of_groups}")
-        plt.legend(loc="upper right")
+        plt.legend()
         plt.xlabel(metrics.metric_names[0])
         plt.ylabel(metrics.metric_names[1])
 
@@ -299,6 +300,30 @@ class SpineGrouping:
                     intersections[self_label][other_label] /= intersection_sum
 
         return intersections
+    
+    def get_representative_samples(self, metrics: SpineMetricDataset,
+                                   num_of_samples: int = 4,
+                                   distance: Callable = euclidean) -> Dict[str, List[str]]:
+        if distance is None:
+            distance = euclidean
+
+        output = {}
+        for label, group in self.groups.items():
+            num_of_samples = min(num_of_samples, len(group))
+            spine_data = [metrics.row_as_array(spine_name) for spine_name in group]
+            # calculate group center
+            center = np.mean(spine_data, 0)
+            # calculate distance to center for each spine in cluster
+            distances = {}
+            for (data, name) in zip(spine_data, group):
+                distances[name] = distance(center, data)
+            # sort spines by distance
+            sorted_by_distance = list(group)
+            sorted_by_distance.sort(key=lambda name: distances[name])
+            # return first N spine names
+            output[label] = sorted_by_distance[:num_of_samples]
+
+        return output
 
 
 class SpineFitter(ABC):
@@ -309,28 +334,6 @@ class SpineFitter(ABC):
     def __init__(self, pca_dim: int = -1):
         self.pca_dim = pca_dim
         self.grouping = SpineGrouping()
-
-    # def get_representative_samples(self, group_index: int,
-    #                                num_of_samples: int = 4,
-    #                                distance: Callable = euclidean) -> List[str]:
-    #     if distance is None:
-    #         distance = euclidean
-    #
-    #     # get spines in cluster
-    #     spine_names = self.groups[group_index]
-    #     num_of_samples = min(num_of_samples, len(spine_names))
-    #     spines = [self.get_spine_reduced_coord(name) for name in spine_names]
-    #     # calculate center (mean reduced data)
-    #     center = np.mean(spines, 0)
-    #     # calculate distance to center for each spine in cluster
-    #     distances = {}
-    #     for (spine, name) in zip(spines, spine_names):
-    #         distances[name] = distance(center, spine)
-    #     # sort spines by distance
-    #     output = list(spine_names)
-    #     output.sort(key=lambda name: distances[name])
-    #     # return first N spine names
-    #     return output[:num_of_samples]
 
     def fit(self, spine_metrics: SpineMetricDataset) -> None:
         self.fit_metrics = spine_metrics

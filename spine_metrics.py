@@ -291,7 +291,7 @@ def get_metric_class(metric_name):
 def calculate_metrics(spine_mesh: Polyhedron_3,
                       metric_names: List[str], params: List[Dict[str, Any]] = None) -> List[SpineMetric]:
     if params is None:
-        params = {}
+        params = [{}] * len(metric_names)
     out = []
     for i, name in enumerate(metric_names):
         klass = globals()[name + "SpineMetric"]
@@ -489,6 +489,7 @@ class ChordDistributionSpineMetric(HistogramSpineMetric):
     num_of_chords: int
     chords: LineSet
     chord_lengths: List[float]
+    
     def __init__(self, spine_mesh: Polyhedron_3 = None, num_of_chords: int = 3000,
                  num_of_bins: int = 100, relative_max_facet_area: float = 0.001) -> None:
         self.num_of_chords = num_of_chords

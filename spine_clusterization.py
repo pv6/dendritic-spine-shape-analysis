@@ -5,7 +5,6 @@ from ipywidgets import widgets
 from matplotlib import pyplot as plt
 from sklearn.cluster import DBSCAN, KMeans
 from sklearn.metrics import silhouette_score
-from scipy.spatial.distance import euclidean
 import numpy as np
 from sklearn.decomposition import PCA
 from abc import ABC, abstractmethod

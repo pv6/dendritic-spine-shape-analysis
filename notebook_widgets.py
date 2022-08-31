@@ -3,7 +3,6 @@ from matplotlib.colors import Normalize
 import numpy as np
 from ipywidgets import widgets
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3
-from CGAL.CGAL_Kernel import Vector_3, Point_3
 from typing import List, Tuple, Dict, Set, Iterable, Callable
 from spine_fitter import SpineGrouping
 from spine_segmentation import point_2_list, list_2_point, hash_point, \
@@ -12,9 +11,8 @@ from spine_segmentation import point_2_list, list_2_point, hash_point, \
 import meshplot as mp
 from IPython.display import display
 from spine_metrics import SpineMetric, SpineMetricDataset, calculate_metrics, \
-    get_metric_class, HistogramSpineMetric, FloatSpineMetric, MeshDataset, LineSet, \
+    HistogramSpineMetric, FloatSpineMetric, MeshDataset, LineSet, \
     OldChordDistributionSpineMetric
-from scipy.ndimage.measurements import label
 from spine_clusterization import SpineClusterizer, KMeansSpineClusterizer, DBSCANSpineClusterizer
 from pathlib import Path
 import os
@@ -23,7 +21,10 @@ from functools import cmp_to_key
 from spine_clusterization import ks_test
 from CGAL.CGAL_Polygon_mesh_processing import Polylines
 from CGAL.CGAL_Surface_mesh_skeletonization import surface_mesh_skeletonization
+from scipy.spatial.distance import euclidean
 
+
+Color = Tuple[float, float, float]
 
 RED = (1, 0, 0)
 GREEN = (0, 1, 0)
@@ -85,7 +86,7 @@ class SpineMeshDataset:
     def get_dendrite_v_f(self, spine_name: str) -> V_F:
         return self.dendrite_v_f[self.spine_to_dendrite[spine_name]]
 
-    def apply_scale(self, scale: Tuple[float, float, float]) -> None:
+    def apply_scale(self, scale: Color) -> None:
         def _apply_scale(mesh_dataset: MeshDataset) -> None:
             for (name, mesh) in mesh_dataset.items():
                 mesh_dataset[name] = apply_scale(mesh, scale)
@@ -139,7 +140,7 @@ def _mesh_to_v_f(mesh: Polyhedron_3) -> V_F:
 def create_dir(dir_name: str) -> None:
     try:
         os.mkdir(dir_name)
-    except OSError as error:
+    except OSError as _:
         pass
 
 
@@ -155,7 +156,7 @@ def preprocess_meshes(spine_meshes: MeshDataset) -> Dict[str, V_F]:
     return output
 
 
-def show_3d_mesh(mesh: Polyhedron_3, scale: Tuple[float, float, float] = (1, 1, 1)) -> None:
+def show_3d_mesh(mesh: Polyhedron_3, scale: Color = (1, 1, 1)) -> None:
     shown_mesh = apply_scale(mesh, scale)
     v, f = _mesh_to_v_f(shown_mesh)
     mp.plot(v, f)
@@ -198,7 +199,7 @@ def show_line_set(lines: LineSet, mesh: Polyhedron_3 = None) -> None:
     view = mp.Viewer({})
     _add_line_set_to_viewer(view, lines)
     if mesh:
-        _add_mesh_to_viewer_as_wireframe(view, mesh)
+        _add_mesh_to_viewer_as_wireframe(view, _mesh_to_v_f(mesh))
     display(view._renderer)
 
 
@@ -230,17 +231,22 @@ def _show_cross_planes(ax, coord_1, coord_2, shape, color_1, color_2, border_col
     ax.plot((shape[1] - 1, shape[1] - 1), (0, shape[0] - 1), color=border_color, lw=3)
 
 
-def make_viewer(v: np.ndarray, f: np.ndarray, c=None, width: int = 600,
-                height: int = 600) -> mp.Viewer:
-    view = mp.Viewer({"width": width, "height": height})
-    view.add_mesh(v, f, c)
-    return view
+def make_viewer(width: int = 600, height: int = 600) -> mp.Viewer:
+    return mp.Viewer({"width": width, "height": height})
+
+
+def make_colors(v_f: V_F, color: Color) -> np.ndarray:
+    num_of_v = v_f[0].shape[0]
+    colors = np.ndarray((num_of_v, 3))
+    for i in range(num_of_v):
+        colors[i] = color
+    return colors
 
 
 def _segmentation_to_colors(vertices: np.ndarray,
                             segmentation: Segmentation,
-                            dendrite_color: Tuple[float, float, float] = GREEN,
-                            spine_color: Tuple[float, float, float] = RED) -> np.ndarray:
+                            dendrite_color: Color = GREEN,
+                            spine_color: Color = RED) -> np.ndarray:
     colors = np.ndarray((vertices.shape[0], 3))
     for i, vertex in enumerate(vertices):
         if hash_point(list_2_point(vertex)) in segmentation:
@@ -253,14 +259,14 @@ def _segmentation_to_colors(vertices: np.ndarray,
 def _grouping_to_colors(vertices: np.ndarray,
                         spine_meshes: MeshDataset,
                         grouping: SpineGrouping,
-                        dendrite_color: Tuple[float, float, float] = GREEN) -> np.ndarray:
+                        dendrite_color: Color = GREEN) -> np.ndarray:
     # generate segmentation for each group
     group_segmentations = []
     outlier_group = grouping.outlier_group
     group_colors = []
-    for (group_label, group) in grouping.groups.items():
+    for (label, group) in grouping.groups.items():
         group_segmentations.append(spines_to_segmentation([spine_meshes[name] for name in group]))
-        group_colors.append(grouping.colors[group_label])
+        group_colors.append(grouping.colors[label])
     group_segmentations.append(spines_to_segmentation([spine_meshes[name] for name in outlier_group]))
     group_colors.append(BLACK)
 
@@ -285,7 +291,7 @@ class SpinePreview:
     spine_name: str
     metrics: List[SpineMetric]
 
-    spine_color: Tuple[float, float, float]
+    spine_color: Color
 
     _spine_colors: np.ndarray
 
@@ -303,7 +309,7 @@ class SpinePreview:
                  dendrite_v_f: V_F,
                  metrics: List[SpineMetric],
                  spine_name: str,
-                 spine_color: Tuple[float, float, float] = RED) -> None:
+                 spine_color: Color = RED) -> None:
         self.spine_color = spine_color
         self._spine_mesh_id = 0
         self._dendrite_v_f = dendrite_v_f
@@ -357,8 +363,8 @@ class SpinePreview:
 
     def _make_dendrite_view(self) -> widgets.Widget:
         # make mesh viewer
-        self.dendrite_viewer = make_viewer(*self._dendrite_v_f,
-                                           self._get_dendrite_colors(), 400, 600)
+        self.dendrite_viewer = make_viewer(400, 600)
+        self.dendrite_viewer.add_mesh(*self._dendrite_v_f, self._get_dendrite_colors())
 
         # set layout
         self.dendrite_viewer._renderer.layout = widgets.Layout(border="solid 1px")
@@ -370,8 +376,8 @@ class SpinePreview:
 
     def _make_spine_view(self) -> widgets.Widget:
         # make mesh viewer
-        self.spine_viewer = make_viewer(*self._spine_v_f,
-                                        self._get_spine_colors(), 200, 200)
+        self.spine_viewer = make_viewer(200, 200)
+        self.spine_viewer.add_mesh(*self._spine_v_f, self._get_spine_colors())
 
         # set layout
         self.spine_viewer._renderer.layout = widgets.Layout(border="solid 1px")
@@ -505,18 +511,18 @@ def _make_navigation_widget(slider: widgets.IntSlider, step=1) -> widgets.Widget
     next_button = widgets.Button(description=">")
     prev_button = widgets.Button(description="<")
 
-    def disable_buttons(change=None) -> None:
+    def disable_buttons(_=None) -> None:
         next_button.disabled = slider.value >= slider.max
         prev_button.disabled = slider.value <= slider.min
         
     disable_buttons()
     slider.observe(disable_buttons)
 
-    def next_callback(button: widgets.Button) -> None:
+    def next_callback(_: widgets.Button) -> None:
         slider.value += step
         disable_buttons()
 
-    def prev_callback(button: widgets.Button) -> None:
+    def prev_callback(_: widgets.Button) -> None:
         slider.value -= step
         disable_buttons()
 
@@ -744,7 +750,7 @@ def interactive_binarization(image: np.ndarray) -> widgets.Widget:
                                block_size=block_size_slider)
 
 
-def select_connected_component_widget(binary_image: np.ndarray) ->widgets.Widget:
+def select_connected_component_widget(binary_image: np.ndarray) -> widgets.Widget:
     # find connected components
     labels, num_of_components = label(binary_image)
 
@@ -794,7 +800,7 @@ def grouping_widget(grouping: SpineGrouping,
     spine_previews_by_cluster = {label: {} for label in grouping.group_labels}
     colors = grouping.colors
 
-    def show_spine_by_cluster(label: str):
+    def show_spine_by_group_label(label: str):
         def show_spine_by_name(spine_name: str):
             if spine_name not in spine_previews_by_cluster[label]:
                 preview = SpinePreview(spine_dataset.spine_meshes[spine_name],
@@ -816,7 +822,7 @@ def grouping_widget(grouping: SpineGrouping,
     group_label_dropdown = widgets.Dropdown(options=grouping.sorted_group_labels,
                                             description="Group:")
 
-    return widgets.interactive(show_spine_by_cluster, label=group_label_dropdown)
+    return widgets.interactive(show_spine_by_group_label, label=group_label_dropdown)
 
 
 # def new_clusterization_widget(clusterizer: SpineClusterizer,
@@ -860,8 +866,8 @@ def new_new_clusterization_widget(grouping: SpineGrouping,
                 spine_dataset.spine_meshes,
                 grouping)
 
-        viewer = make_viewer(*spine_dataset.dendrite_v_f[dendrite_name],
-                             colors[dendrite_name])
+        viewer = make_viewer()
+        viewer.add_mesh(*spine_dataset.dendrite_v_f[dendrite_name], colors[dendrite_name])
         # for spine_name in spine_dataset.dendrite_to_spines[dendrite_name]:
         #     viewer.add_mesh(*spine_dataset.spine_v_f[spine_name])
 
@@ -875,20 +881,24 @@ def new_new_clusterization_widget(grouping: SpineGrouping,
     return widgets.interactive(show_dendrite_by_name, dendrite_name=dendrite_name_dropdown)
 
 
-# def representative_clusterization_widget(clusterizer: SpineClusterizer,
-#                                          spine_meshes: Dict[str, V_F],
-#                                          num_of_samples: int = 3) -> widgets.Widget:
-#     # TODO: deal with dictionaries better than this PLEASE
-#     spine_mesh_list = list(spine_meshes.values())
-#
-#     # for each cluster
-#     rows = []
-#     for index in range(clusterizer.num_of_clusters):
-#         row = [widgets.Label(f"{index}:")]
-#         row.extend([make_viewer(*spine_mesh_list[i], None, 100, 100)._renderer
-#                     for i in clusterizer.get_representative_samples(index, num_of_samples)])
-#         rows.append(widgets.HBox(row))
-#     return widgets.HBox([clusterizer.show(), widgets.VBox(rows)])
+def representative_spines_widget(grouping: SpineGrouping,
+                                 spine_dataset: SpineMeshDataset,
+                                 metrics_dataset: SpineMetricDataset,
+                                 num_of_samples: int = 3,
+                                 distance: Callable = euclidean) -> widgets.Widget:
+    representatives = grouping.get_representative_samples(metrics_dataset, num_of_samples, distance)
+    colors = grouping.colors
+
+    rows = []
+    for label in grouping.sorted_group_labels:
+        row = [widgets.Label(f"{label}:")]
+        for name in representatives[label]:
+            viewer = make_viewer(100, 100)
+            v_f = spine_dataset.spine_v_f[name]
+            viewer.add_mesh(*v_f, make_colors(v_f, colors[label][:3]))
+            row.append(viewer._renderer)
+        rows.append(widgets.HBox(row))
+    return widgets.HBox([grouping.show(metrics_dataset), widgets.VBox(rows)])
 
 
 def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
@@ -919,9 +929,9 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
 
     for (dim, dim_scores) in scores.items():
         for value in param_values:
-            clusterizer = clusterizer_type(**{param_name: value}, **static_params, pca_dim=dim)
-            clusterizer.fit(spine_metrics)
-            dim_scores.append(score_function(clusterizer))
+            scored_clusterizer = clusterizer_type(**{param_name: value}, **static_params, pca_dim=dim)
+            scored_clusterizer.fit(spine_metrics)
+            dim_scores.append(score_function(scored_clusterizer))
 
     peak = np.nanargmax(scores[pca_dim])
 
@@ -1245,7 +1255,7 @@ def consensus_widget(groupings: List[SpineGrouping]) -> widgets.Widget:
 
 def spine_dataset_view_widget(spine_dataset: SpineMeshDataset,
                               metrics_dataset: SpineMetricDataset,
-                              spine_color: Tuple[float, float, float] = RED) -> widgets.Widget:
+                              spine_color: Color = RED) -> widgets.Widget:
     def show_spine_by_name(spine_name: str):
         spine_mesh = spine_dataset.spine_meshes[spine_name]
         spine_v_f = spine_dataset.spine_v_f[spine_name]
@@ -1314,11 +1324,14 @@ def view_skeleton_widget(scaled_spine_dataset: SpineMeshDataset) -> widgets.Widg
         w = 600
         h = 600
 
-        mesh_viewer = make_viewer(*scaled_spine_dataset.dendrite_v_f[dendrite_name], width=w, height=h)
-        skeleton_viewer = mp.Viewer({"width": w, "height": h})
+        mesh_viewer = make_viewer(w, h)
+        mesh_viewer.add_mesh(*scaled_spine_dataset.dendrite_v_f[dendrite_name])
+
+        skeleton_viewer = make_viewer(w, h)
         skeleton_line_set = polylines_to_line_set(skeleton_polylines)
         _add_line_set_to_viewer(skeleton_viewer, skeleton_line_set)
-        skeleton_mesh_viewer = mp.Viewer({"width": w, "height": h})
+
+        skeleton_mesh_viewer = make_viewer(w, h)
         _add_line_set_to_viewer(skeleton_mesh_viewer, polylines_to_line_set(skeleton_polylines))
         _add_mesh_to_viewer_as_wireframe(skeleton_mesh_viewer, dendrite_v_f)
 
@@ -1345,6 +1358,8 @@ def inspect_grouping_widget(grouping: SpineGrouping, spine_dataset: SpineMeshDat
         elif inspector_index == 1:
             if reference_grouping is not None:
                 intersection_widgets = [
+                    widgets.HBox([grouping.show(metrics_dataset),
+                                  reference_grouping.show(metrics_dataset)]),
                     widgets.Label("-- Clusters Over Classes --"),
                     grouping_intersection_widget(grouping, reference_grouping, False),
                     widgets.Label("-- Classes Over Clusters, Non-normalized --"),
