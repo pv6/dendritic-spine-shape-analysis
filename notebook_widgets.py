@@ -404,6 +404,7 @@ class SpinePreview:
 class SelectableSpinePreview(SpinePreview):
     is_selected_checkbox: widgets.Checkbox
     is_selected: bool
+    on_selected: Callable[["SelectableSpinePreview"], None] = None
 
     _unselected_spine_colors: np.ndarray
     _unselected_dendrite_colors: np.ndarray
@@ -496,6 +497,8 @@ class SelectableSpinePreview(SpinePreview):
         self.is_selected = value
         self.spine_viewer.update_object(self._spine_mesh_id, colors=self._get_spine_colors())
         self.dendrite_viewer.update_object(colors=self._get_dendrite_colors())
+        if self.on_selected is not None:
+            self.on_selected(self)
 
 
 def _make_navigation_widget(slider: widgets.IntSlider, step=1) -> widgets.Widget:
@@ -528,21 +531,36 @@ def select_spines_widget(spine_meshes: List[Polyhedron_3],
                          dendrite_mesh: Polyhedron_3,
                          metric_names: List[str],
                          metric_params: List[Dict] = None) -> widgets.Widget:
+    # create selectable 3d previews for each spine
     dendrite_v_f: V_F = _mesh_to_v_f(dendrite_mesh)
     spine_previews = [SelectableSpinePreview(spine_mesh, _mesh_to_v_f(spine_mesh),
                                              dendrite_v_f, dendrite_mesh, metric_names,
                                              metric_params)
                       for spine_mesh in spine_meshes]
 
-    def show_spine_by_index(index: int):
+    # set callbacks to update selected spines on checkbox toggle
+    selection = []
+
+    def on_selected_callback(_: SelectableSpinePreview) -> None:
+        selection.clear()
+        selection.extend([(selected_preview.spine_mesh, selected_preview.metrics)
+                          for selected_preview in spine_previews if selected_preview.is_selected])
+
+    for preview in spine_previews:
+        preview.on_selected = on_selected_callback
+
+    # show previews
+    def show_spine_by_index(index: int) -> List[Tuple[Polyhedron_3, List[SpineMetric]]]:
         # keeping old views caused bugs when switching between spines
         # this sacrifices saving camera position but oh well
         spine_previews[index].create_views()
         display(spine_previews[index].widget)
 
         # selected spine meshes and metrics
-        return [(preview.spine_mesh, preview.metrics)
-                for preview in spine_previews if preview.is_selected]
+        selection.clear()
+        selection.extend([(selected_preview.spine_mesh, selected_preview.metrics)
+                          for selected_preview in spine_previews if selected_preview.is_selected])
+        return selection
 
     slider = widgets.IntSlider(min=0, max=len(spine_meshes) - 1)
     navigation_buttons = _make_navigation_widget(slider)
