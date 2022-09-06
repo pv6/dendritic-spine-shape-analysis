@@ -949,6 +949,7 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
     peak = np.nanargmax(scores[pca_dim])
 
     def export_score_graph(_: widgets.Button):
+        create_dir(save_folder)
         filename = f"{save_folder}/score_graph.csv"
         with open(filename, mode="w") as file:
             writer = csv.writer(file)
