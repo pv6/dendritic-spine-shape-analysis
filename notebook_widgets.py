@@ -23,6 +23,7 @@ from spine_clusterization import ks_test
 from CGAL.CGAL_Polygon_mesh_processing import Polylines
 from CGAL.CGAL_Surface_mesh_skeletonization import surface_mesh_skeletonization
 from scipy.spatial.distance import euclidean
+import csv
 
 
 Color = Tuple[float, float, float]
@@ -946,6 +947,18 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
             dim_scores.append(score_function(scored_clusterizer))
 
     peak = np.nanargmax(scores[pca_dim])
+
+    def export_score_graph(_: widgets.Button):
+        filename = f"{save_folder}/score_graph.csv"
+        with open(filename, mode="w") as file:
+            writer = csv.writer(file)
+            writer.writerow([param_name] + param_values)
+            writer.writerow(["score"] + scores[pca_dim])
+        print(f"Saved score graph to '{filename}'.")
+
+    export_score_button = widgets.Button(description="Export Score Graph")
+    export_score_button.on_click(export_score_graph)
+    display(export_score_button)
 
     # reg = LinearRegression().fit(np.reshape(param_values, (-1, 1)), scores[2])
 
