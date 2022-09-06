@@ -9,7 +9,6 @@
 cd PATH_TO_CODE
 conda create --name spine-analysis -c conda-forge --file requirements.txt -y
 ```
-4. Copy CGAL 
 ## Run
 1. Open Anaconda
 2. Execute
