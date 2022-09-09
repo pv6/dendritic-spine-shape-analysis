@@ -998,12 +998,25 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
         def export_clusterization(_: widgets.Button):
             create_dir(save_folder)
             save_path = f"{save_folder}/{param_name}={param_value}_pca={clusterizer.pca_dim}_{clusterizer.grouping.num_of_groups}_clusters"
-            clusterization_save_path = save_path + "_clusterization.json"
-            distribution_save_path = save_path + "_metric_distributions.csv"
+            create_dir(save_path)
+            save_path += "/"
+
+            clusterization_save_path = save_path + "clusterization.json"
             clusterizer.grouping.save(clusterization_save_path)
             print(f"Saved clusterization to \"{clusterization_save_path}\".")
-            clusterizer.save_metric_distribution(distribution_save_path)
+
+            distribution_save_path = save_path + "metric_distributions.csv"
+            clusterizer.grouping.save_metric_distribution(every_spine_metrics, distribution_save_path)
             print(f"Saved metric distributions to \"{distribution_save_path}\".")
+
+            clust_over_class_save_path = save_path + "intersection_clust_over_class.csv"
+            clusterizer.grouping.intersection_ratios(classification, False).save(clust_over_class_save_path)
+            class_over_clust_save_path = save_path + "intersection_class_over_clust.csv"
+            classification.intersection_ratios(clusterizer.grouping, False).save(class_over_clust_save_path)
+            class_over_clust_norm_save_path = save_path + "intersection_class_over_clust_norm.csv"
+            classification.intersection_ratios(clusterizer.grouping, True).save(class_over_clust_norm_save_path)
+            print(f'Saved intersection ratios to "{clust_over_class_save_path}", '
+                  f'"{class_over_clust_save_path}", "{class_over_clust_norm_save_path}".')
 
         export_button = widgets.Button(description="Export Clusterization")
         export_button.on_click(export_clusterization)
