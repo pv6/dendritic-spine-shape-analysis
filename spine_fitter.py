@@ -372,7 +372,7 @@ class SpineGrouping:
             metric_distributions[label] = []
             for metric in metrics.row(list(metrics.spine_names)[0]):
                 group_metrics = metrics.get_spines_subset(group)
-                metric_column = group_metrics.column(metric.name)
+                metric_column = group_metrics.column(metric.name).values()
                 metric_distributions[label].append(metric.get_distribution(metric_column))
         return metric_distributions
 
@@ -385,6 +385,31 @@ class SpineGrouping:
                 name_distribution = zip(metrics.metric_names, group_distributions)
                 for metric_name, metric_distribution in name_distribution:
                     writer.writerow([metric_name] + list(metric_distribution))
+
+    def save_pca(self, metrics: SpineMetricDataset, filename: str) -> None:
+        reduced_metrics = metrics.pca(2)
+
+        coord_key = "pca"
+
+        with open(filename, "w") as file:
+            for label, group in self.groups.items():
+                # write grouping label
+                file.write(f"{label}\n\n")
+
+                # only consider spines from this group
+                reduced_metrics_subset = reduced_metrics.get_spines_subset(group)
+                
+                # write header
+                writer = csv.DictWriter(file, ["pca"] + reduced_metrics_subset.ordered_spine_names)
+                writer.writeheader()
+
+                # write pca coordinates for every spine
+                for pca_coord_name in reduced_metrics_subset.metric_names:
+                    column: Dict = reduced_metrics_subset.column(pca_coord_name)
+                    for key, value in column.items():
+                        column[key] = value.value
+                    column[coord_key] = pca_coord_name
+                    writer.writerow(column)
 
 
 class SpineFitter(ABC):

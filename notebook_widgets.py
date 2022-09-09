@@ -1005,6 +1005,10 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
             clusterizer.grouping.save(clusterization_save_path)
             print(f"Saved clusterization to \"{clusterization_save_path}\".")
 
+            pca_save_path = save_path + "pca.csv"
+            clusterizer.grouping.save_pca(spine_metrics, pca_save_path)
+            print(f"Saved pca coordinates to \"{pca_save_path}\".")
+
             distribution_save_path = save_path + "metric_distributions.csv"
             clusterizer.grouping.save_metric_distribution(every_spine_metrics, distribution_save_path)
             print(f"Saved metric distributions to \"{distribution_save_path}\".")
@@ -1089,7 +1093,7 @@ def grouping_metric_distribution_widget(grouping: SpineGrouping,
             colors = grouping.colors
             for label, cluster in grouping.groups.items():
                 cluster_metrics = metrics.get_spines_subset(cluster)
-                metric_column = cluster_metrics.column(metric.name)
+                metric_column = list(cluster_metrics.column(metric.name).values())
                 data.append(metric.get_distribution(metric_column))
                 if issubclass(metric.__class__, HistogramSpineMetric):
                     value = metric.get_distribution(metric_column)
