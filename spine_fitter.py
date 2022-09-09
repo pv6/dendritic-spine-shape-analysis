@@ -1,5 +1,5 @@
 from spine_metrics import SpineMetricDataset
-from typing import List, Tuple, Set, Dict, Iterable, Callable
+from typing import List, Tuple, Set, Dict, Iterable, Callable, Union
 from ipywidgets import widgets
 from matplotlib import pyplot as plt
 import numpy as np
@@ -8,6 +8,48 @@ from abc import ABC, abstractmethod
 import json
 import random
 from scipy.spatial.distance import euclidean
+import csv
+
+
+class IntersectionRatios(Dict[str, Dict[str, float]]):
+    @property
+    def a_group_labels(self) -> Set[str]:
+        return set(self.keys())
+
+    @property
+    def b_group_labels(self) -> Set[str]:
+        a_group_labels = self.a_group_labels
+        if len(a_group_labels) == 0:
+            return set()
+        return set(self[a_group_labels.pop()].keys())
+
+    @property
+    def ordered_a_group_labels(self) -> List[str]:
+        output = list(self.a_group_labels)
+        output.sort()
+        return output
+
+    @property
+    def ordered_b_group_labels(self) -> List[str]:
+        output = list(self.b_group_labels)
+        output.sort()
+        return output
+
+    def save(self, filename: str) -> None:
+        with open(filename, "w") as file:
+            if len(self) == 0:
+                return
+            denominator_group_key = "denominator_group"
+            # do this weird thing with labels because numbers don't sort well as strings
+            # it would be 1 11 2 3 ... otherwise
+            writer = csv.DictWriter(file, [denominator_group_key] + list(self[self.a_group_labels.pop()].keys()))
+            # VV uncomment this line if you figure out a better way to sort VV
+            # writer = csv.DictWriter(file, [denominator_group_key] + self.ordered_b_group_labels)
+            writer.writeheader()
+            for a_group_label, group_ratios in self.items():
+                group_ratios: Dict[str, Union[str, float]] = group_ratios.copy()
+                group_ratios[denominator_group_key] = a_group_label
+                writer.writerow(group_ratios)
 
 
 class SpineGrouping:
@@ -280,8 +322,8 @@ class SpineGrouping:
 
         return SpineGrouping(new_samples, new_groups)
 
-    def intersection_ratios(self, other: "SpineGrouping", normalize: bool = True) -> Dict[str, Dict[str, float]]:
-        intersections = {}
+    def intersection_ratios(self, other: "SpineGrouping", normalize: bool = True) -> IntersectionRatios:
+        intersections = IntersectionRatios()
         for i, (self_label, self_group) in enumerate(self.groups_with_outliers.items()):
             if len(self_group) == 0:
                 continue
@@ -298,9 +340,8 @@ class SpineGrouping:
                 intersection_sum = sum(value for value in intersections[self_label].values())
                 for other_label in intersections[self_label].keys():
                     intersections[self_label][other_label] /= intersection_sum
-
         return intersections
-    
+
     def get_representative_samples(self, metrics: SpineMetricDataset,
                                    num_of_samples: int = 4,
                                    distance: Callable = euclidean) -> Dict[str, List[str]]:
@@ -324,6 +365,51 @@ class SpineGrouping:
             output[label] = sorted_by_distance[:num_of_samples]
 
         return output
+
+    def get_metric_distributions(self, metrics: SpineMetricDataset) -> Dict[str, np.array]:
+        metric_distributions = {}
+        for label, group in self.groups.items():
+            metric_distributions[label] = []
+            for metric in metrics.row(list(metrics.spine_names)[0]):
+                group_metrics = metrics.get_spines_subset(group)
+                metric_column = group_metrics.column(metric.name).values()
+                metric_distributions[label].append(metric.get_distribution(metric_column))
+        return metric_distributions
+
+    def save_metric_distribution(self, metrics: SpineMetricDataset, filename: str) -> None:
+        all_distributions = self.get_metric_distributions(metrics)
+        with open(filename, "w") as file:
+            writer = csv.writer(file)
+            for label, group_distributions in all_distributions.items():
+                writer.writerow([label])
+                name_distribution = zip(metrics.metric_names, group_distributions)
+                for metric_name, metric_distribution in name_distribution:
+                    writer.writerow([metric_name] + list(metric_distribution))
+
+    def save_pca(self, metrics: SpineMetricDataset, filename: str) -> None:
+        reduced_metrics = metrics.pca(2)
+
+        coord_key = "pca"
+
+        with open(filename, "w") as file:
+            for label, group in self.groups.items():
+                # write grouping label
+                file.write(f"{label}\n\n")
+
+                # only consider spines from this group
+                reduced_metrics_subset = reduced_metrics.get_spines_subset(group)
+                
+                # write header
+                writer = csv.DictWriter(file, ["pca"] + reduced_metrics_subset.ordered_spine_names)
+                writer.writeheader()
+
+                # write pca coordinates for every spine
+                for pca_coord_name in reduced_metrics_subset.metric_names:
+                    column: Dict = reduced_metrics_subset.column(pca_coord_name)
+                    for key, value in column.items():
+                        column[key] = value.value
+                    column[coord_key] = pca_coord_name
+                    writer.writerow(column)
 
 
 class SpineFitter(ABC):

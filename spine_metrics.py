@@ -73,7 +73,7 @@ class SpineMetric(ABC):
 
     @classmethod
     @abstractmethod
-    def get_distribution(cls, metrics: List["SpineMetric"]) -> np.ndarray:
+    def get_distribution(cls, metrics: Iterable["SpineMetric"]) -> np.ndarray:
         pass
 
     @classmethod
@@ -87,7 +87,7 @@ class SpineMetric(ABC):
 
     @classmethod
     @abstractmethod
-    def _show_distribution(cls, metrics: List["SpineMetric"]) -> None:
+    def _show_distribution(cls, metrics: Iterable["SpineMetric"]) -> None:
         pass
 
     def value_as_list(self) -> List[Any]:
@@ -132,8 +132,9 @@ class SpineMetricDataset:
         for row in self._table:
             yield list(row)
 
-    def column(self, metric_name: str) -> List[SpineMetric]:
-        return self._table[:, self._metric_2_column[metric_name]]
+    def column(self, metric_name: str) -> Dict[str, SpineMetric]:
+        column_idx = self._metric_2_column[metric_name]
+        return {spine_name: self.row(spine_name)[column_idx] for spine_name in self.spine_names}
 
     @property
     def ordered_spine_names(self) -> List[str]:
@@ -304,11 +305,11 @@ class FloatSpineMetric(SpineMetric, ABC):
         return widgets.Label(f"{self._value:.2f}")
 
     @classmethod
-    def get_distribution(cls, metrics: List["SpineMetric"]) -> np.ndarray:
+    def get_distribution(cls, metrics: Iterable["SpineMetric"]) -> np.ndarray:
         return np.asarray([metric.value for metric in metrics])
 
     @classmethod
-    def _show_distribution(cls, metrics: List["SpineMetric"]) -> None:
+    def _show_distribution(cls, metrics: Iterable["SpineMetric"]) -> None:
         plt.boxplot(cls.get_distribution(metrics))
 
 
@@ -464,12 +465,12 @@ class HistogramSpineMetric(SpineMetric):
         return out
 
     @classmethod
-    def get_distribution(cls, metrics: List["SpineMetric"]) -> np.ndarray:
+    def get_distribution(cls, metrics: Iterable["SpineMetric"]) -> np.ndarray:
         histograms = np.asarray([metric.value for metric in metrics])
         return np.mean(histograms, 0)
 
     @classmethod
-    def _show_distribution(cls, metrics: List["SpineMetric"]) -> None:
+    def _show_distribution(cls, metrics: Iterable["SpineMetric"]) -> None:
         value = cls.get_distribution(metrics)
         left_edges = [i / len(value) for i in range(len(value))]
         width = 0.85 * (left_edges[1] - left_edges[0])

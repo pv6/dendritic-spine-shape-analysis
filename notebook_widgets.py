@@ -997,9 +997,30 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
         # export clusterization button
         def export_clusterization(_: widgets.Button):
             create_dir(save_folder)
-            save_path = f"{save_folder}/{param_name}={param_value}_pca={clusterizer.pca_dim}_{clusterizer.grouping.num_of_groups}_clusters.json"
-            clusterizer.grouping.save(save_path)
-            print(f"Saved clusterization to \"{save_path}\".")
+            save_path = f"{save_folder}/{param_name}={param_value}_pca={clusterizer.pca_dim}_{clusterizer.grouping.num_of_groups}_clusters"
+            create_dir(save_path)
+            save_path += "/"
+
+            clusterization_save_path = save_path + "clusterization.json"
+            clusterizer.grouping.save(clusterization_save_path)
+            print(f"Saved clusterization to \"{clusterization_save_path}\".")
+
+            pca_save_path = save_path + "pca.csv"
+            clusterizer.grouping.save_pca(spine_metrics, pca_save_path)
+            print(f"Saved pca coordinates to \"{pca_save_path}\".")
+
+            distribution_save_path = save_path + "metric_distributions.csv"
+            clusterizer.grouping.save_metric_distribution(every_spine_metrics, distribution_save_path)
+            print(f"Saved metric distributions to \"{distribution_save_path}\".")
+
+            clust_over_class_save_path = save_path + "intersection_clust_over_class.csv"
+            clusterizer.grouping.intersection_ratios(classification, False).save(clust_over_class_save_path)
+            class_over_clust_save_path = save_path + "intersection_class_over_clust.csv"
+            classification.intersection_ratios(clusterizer.grouping, False).save(class_over_clust_save_path)
+            class_over_clust_norm_save_path = save_path + "intersection_class_over_clust_norm.csv"
+            classification.intersection_ratios(clusterizer.grouping, True).save(class_over_clust_norm_save_path)
+            print(f'Saved intersection ratios to "{clust_over_class_save_path}", '
+                  f'"{class_over_clust_save_path}", "{class_over_clust_norm_save_path}".')
 
         export_button = widgets.Button(description="Export Clusterization")
         export_button.on_click(export_clusterization)
@@ -1072,7 +1093,7 @@ def grouping_metric_distribution_widget(grouping: SpineGrouping,
             colors = grouping.colors
             for label, cluster in grouping.groups.items():
                 cluster_metrics = metrics.get_spines_subset(cluster)
-                metric_column = cluster_metrics.column(metric.name)
+                metric_column = list(cluster_metrics.column(metric.name).values())
                 data.append(metric.get_distribution(metric_column))
                 if issubclass(metric.__class__, HistogramSpineMetric):
                     value = metric.get_distribution(metric_column)
