@@ -997,9 +997,13 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
         # export clusterization button
         def export_clusterization(_: widgets.Button):
             create_dir(save_folder)
-            save_path = f"{save_folder}/{param_name}={param_value}_pca={clusterizer.pca_dim}_{clusterizer.grouping.num_of_groups}_clusters.json"
-            clusterizer.grouping.save(save_path)
-            print(f"Saved clusterization to \"{save_path}\".")
+            save_path = f"{save_folder}/{param_name}={param_value}_pca={clusterizer.pca_dim}_{clusterizer.grouping.num_of_groups}_clusters"
+            clusterization_save_path = save_path + "_clusterization.json"
+            distribution_save_path = save_path + "_metric_distributions.csv"
+            clusterizer.grouping.save(clusterization_save_path)
+            print(f"Saved clusterization to \"{clusterization_save_path}\".")
+            clusterizer.save_metric_distribution(distribution_save_path)
+            print(f"Saved metric distributions to \"{distribution_save_path}\".")
 
         export_button = widgets.Button(description="Export Clusterization")
         export_button.on_click(export_clusterization)

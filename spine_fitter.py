@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 import json
 import random
 from scipy.spatial.distance import euclidean
+import csv
 
 
 class SpineGrouping:
@@ -352,3 +353,23 @@ class SpineFitter(ABC):
 
     def show(self) -> widgets.Widget:
         return self.grouping.show(self.fit_metrics)
+
+    def get_metric_distributions(self) -> Dict[np.array]:
+        metric_distributions = {}
+        for label, group in self.grouping.groups.items():
+            metric_distributions[label] = []
+            for metric in self.fit_metrics.row(list(self.fit_metrics.spine_names)[0]):
+                group_metrics = self.fit_metrics.get_spines_subset(group)
+                metric_column = group_metrics.column(metric.name)
+                metric_distributions[label].append(metric.get_distribution(metric_column))
+        return metric_distributions
+
+    def save_metric_distribution(self, filename: str) -> None:
+        all_distributions = self.get_metric_distributions()
+        with open(filename, "w") as file:
+            writer = csv.writer(file)
+            for label, group_distributions in all_distributions.items():
+                writer.writerow([label])
+                name_distribution = zip(self.fit_metrics.metric_names, group_distributions)
+                for metric_name, metric_distribution in name_distribution:
+                    writer.writerow([metric_name] + metric_distribution)
