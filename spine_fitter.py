@@ -425,6 +425,7 @@ class SpineFitter(ABC):
         self.fit_metrics = spine_metrics
         data = spine_metrics.as_array()
         if self.pca_dim != -1:
+            self.fit_metrics = spine_metrics.pca(self.pca_dim)
             pca = PCA(self.pca_dim)
             data = pca.fit_transform(data)
 

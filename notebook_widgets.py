@@ -990,7 +990,7 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
             plt.xlabel(param_name)
             plt.ylabel("Score")
             # plt.ylim([-1, 1])
-            plt.legend(loc="lower right")
+            plt.legend()
             # plt.rcParams["figure.figsize"] = (10, 10)
             plt.show()
 
