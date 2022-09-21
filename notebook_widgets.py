@@ -1152,7 +1152,7 @@ def manual_classification_widget(meshes: SpineMeshDataset,
         result_grouping.groups[class_name].add(spine_name[0])
 
         # update preview spine color (if last spine, needs to be updated!)
-        preview[0].spine_color = colors[class_name]
+        preview[0].spine_color = colors[class_name][:3]
 
         # move to next spine
         spine_index_slider.value += 1
