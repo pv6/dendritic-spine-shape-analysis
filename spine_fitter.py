@@ -123,6 +123,11 @@ class SpineGrouping:
         output[self.outliers_label] = (0.3, 0.3, 0.3, 1)
         return output
 
+    def get_group_size(self, group_label: str) -> int:
+        if group_label == self.outliers_label:
+            return len(self.outlier_group)
+        return len(self.groups[group_label])
+
     def get_sorted_group(self, group_label: str) -> List[str]:
         spine_names = list(self.groups[group_label])
         spine_names.sort()

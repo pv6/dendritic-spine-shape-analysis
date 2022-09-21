@@ -1268,11 +1268,16 @@ def consensus_widget(groupings: List[SpineGrouping]) -> widgets.Widget:
             return -1
         if votes_a > votes_b:
             return 1
-        samples_a = len(merged_grouping.groups[label_a])
-        samples_b = len(merged_grouping.groups[label_b])
+
+        # sort by size if equal votes
+        samples_a = merged_grouping.get_group_size(label_a)
+        samples_b = merged_grouping.get_group_size(label_b)
         return np.sign(samples_a - samples_b)
 
-    merged_grouping = SpineGrouping.merge(groupings)
+    for grouping in groupings:
+        grouping.outliers_label = "Unclassified"
+
+    merged_grouping = SpineGrouping.merge(groupings, outliers_label="Unclassified")
     labels = list(merged_grouping.group_labels)
     labels.sort(key=lambda label: len(merged_grouping.groups[label]), reverse=True)
 
