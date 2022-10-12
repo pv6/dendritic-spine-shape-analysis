@@ -1009,6 +1009,14 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
             clusterizer.grouping.save_pca(spine_metrics, pca_save_path)
             print(f"Saved pca coordinates to \"{pca_save_path}\".")
 
+            classification_save_path = save_path + "classification.json"
+            classification.save(classification_save_path)
+            print(f"Saved classification to \"{classification_save_path}\".")
+
+            classification_save_pca_path = save_path + "classification_pca.csv"
+            classification.save_pca(spine_metrics, classification_save_pca_path)
+            print(f"Saved classification pca coordinates to \"{classification_save_pca_path}\".")
+
             distribution_save_path = save_path + "metric_distributions.csv"
             clusterizer.grouping.save_metric_distribution(every_spine_metrics, distribution_save_path)
             print(f"Saved metric distributions to \"{distribution_save_path}\".")
