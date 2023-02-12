@@ -17,8 +17,8 @@ class SpineClusterizer(SpineFitter, ABC):
     _data: np.ndarray
     _labels: List[int]
 
-    def __init__(self, metric: Union[Callable, str] = "euclidean", pca_dim: int = -1):
-        super().__init__(pca_dim)
+    def __init__(self, metric: Union[Callable, str] = "euclidean", dim: int = -1, reduction: str = ""):
+        super().__init__(dim, reduction)
         self._labels = []
         self.metric = metric
 
@@ -103,8 +103,8 @@ class DBSCANSpineClusterizer(SKLearnSpineClusterizer):
     min_samples: int
 
     def __init__(self, eps: float = 0.5, min_samples: int = 2,
-                 metric: Union[str, Callable] = "euclidean", pca_dim: int = -1):
-        super().__init__(metric=metric, pca_dim=pca_dim)
+                 metric: Union[str, Callable] = "euclidean", dim: int = -1, reduction: str = ""):
+        super().__init__(metric=metric, dim=dim, reduction=reduction)
         self.metric = metric
         self.min_samples = min_samples
         self.eps = eps
@@ -176,8 +176,8 @@ class DBSCANSpineClusterizer(SKLearnSpineClusterizer):
 class KMeansSpineClusterizer(SKLearnSpineClusterizer):
     _num_of_clusters: int
 
-    def __init__(self, num_of_clusters: int, pca_dim: int = -1, metric="euclidean"):
-        super().__init__(pca_dim=pca_dim, metric=metric)
+    def __init__(self, num_of_clusters: int, dim: int = -1, metric="euclidean", reduction: str = ""):
+        super().__init__(dim=dim, metric=metric, reduction=reduction)
         self._num_of_clusters = num_of_clusters
 
     def _sklearn_fit(self, data: np.array) -> object:

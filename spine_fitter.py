@@ -1,3 +1,5 @@
+from sklearn.manifold import TSNE
+
 from spine_metrics import SpineMetricDataset
 from typing import List, Tuple, Set, Dict, Iterable, Callable, Union
 from ipywidgets import widgets
@@ -292,7 +294,7 @@ class SpineGrouping:
         colors = self.colors
 
         if metrics.as_array().shape[1] > 2:
-            metrics = metrics.pca(2)
+            metrics = metrics.reduce(2, "pca")
 
         reduced_data = metrics.as_array()
         name_to_index = {name: i for i, name in enumerate(metrics.ordered_spine_names)}
@@ -391,10 +393,9 @@ class SpineGrouping:
                 for metric_name, metric_distribution in name_distribution:
                     writer.writerow([metric_name] + list(metric_distribution))
 
-    def save_pca(self, metrics: SpineMetricDataset, filename: str) -> None:
-        reduced_metrics = metrics.pca(2)
+    def save_reduced(self, metrics: SpineMetricDataset, filename: str, method: str = "pca") -> None:
+        reduced_metrics = metrics.reduce(2, method)
 
-        coord_key = "pca"
 
         with open(filename, "w") as file:
             for label, group in self.groups.items():
@@ -405,34 +406,41 @@ class SpineGrouping:
                 reduced_metrics_subset = reduced_metrics.get_spines_subset(group)
                 
                 # write header
-                writer = csv.DictWriter(file, ["pca"] + reduced_metrics_subset.ordered_spine_names)
+                writer = csv.DictWriter(file, [method] + reduced_metrics_subset.ordered_spine_names)
                 writer.writeheader()
 
                 # write pca coordinates for every spine
-                for pca_coord_name in reduced_metrics_subset.metric_names:
-                    column: Dict = reduced_metrics_subset.column(pca_coord_name)
+                for reduced_coord_name in reduced_metrics_subset.metric_names:
+                    column: Dict = reduced_metrics_subset.column(reduced_coord_name)
                     for key, value in column.items():
                         column[key] = value.value
-                    column[coord_key] = pca_coord_name
+                    column[method] = reduced_coord_name
                     writer.writerow(column)
 
 
 class SpineFitter(ABC):
     grouping: SpineGrouping
-    pca_dim: int
+    dim: int
+    reduction: str
     fit_metrics: SpineMetricDataset
 
-    def __init__(self, pca_dim: int = -1):
-        self.pca_dim = pca_dim
+    def __init__(self, dim: int = -1, reduction: str = ""):
+        assert dim > 0 or not reduction
+        self.dim = dim
+        self.reduction = reduction
         self.grouping = SpineGrouping()
 
     def fit(self, spine_metrics: SpineMetricDataset) -> None:
         self.fit_metrics = spine_metrics
         data = spine_metrics.as_array()
-        if self.pca_dim != -1:
-            self.fit_metrics = spine_metrics.pca(self.pca_dim)
-            pca = PCA(self.pca_dim)
-            data = pca.fit_transform(data)
+        if self.dim != -1:
+            self.fit_metrics = spine_metrics.reduce(self.dim, self.reduction)
+            if self.reduction == "pca":
+                data = PCA(self.dim).fit_transform(data)
+            elif self.reduction == "tsne":
+                data = TSNE(self.dim).fit_transform(data)
+            else:
+                raise NotImplemented(f"method {self.reduction} is not supported")
 
         self.grouping.samples = spine_metrics.spine_names
 

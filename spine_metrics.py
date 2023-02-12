@@ -1,19 +1,21 @@
 import math
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from random import Random
 import numpy as np
 from typing import Any, List, Tuple, Dict, Set, Generator, Iterable
 import ipywidgets as widgets
+from sklearn.manifold import TSNE
+from sklearn.decomposition import PCA
+from matplotlib import pyplot as plt
+import csv
+
 from CGAL.CGAL_Polyhedron_3 import Polyhedron_3, Polyhedron_3_Facet_handle, \
     Polyhedron_3_Halfedge_handle, Polyhedron_3_Vertex_handle, Polyhedron_3_Edge_iterator
 from CGAL.CGAL_Polygon_mesh_processing import area, face_area, volume
 from CGAL.CGAL_Kernel import Ray_3, Point_3, Vector_3, cross_product
 from CGAL.CGAL_AABB_tree import AABB_tree_Polyhedron_3_Facet_handle
-from matplotlib import pyplot as plt
-import csv
 from CGAL.CGAL_Convex_hull_3 import convex_hull_3
-from copy import deepcopy
-from sklearn.decomposition import PCA
 
 
 MeshDataset = Dict[str, Polyhedron_3]
@@ -220,18 +222,23 @@ class SpineMetricDataset:
         data = [self.row_as_array(spine_name) for spine_name in self.ordered_spine_names]
         return np.asarray(data)
 
-    def as_reduced_array(self, n_components: int = 2) -> np.ndarray:
-        return PCA(n_components).fit_transform(self.as_array())
+    def as_reduced_array(self, n_components: int = 2, method: str = "pca") -> np.ndarray:
+        if method == "pca":
+            return PCA(n_components).fit_transform(self.as_array())
+        elif method == "tsne":
+            return TSNE(n_components).fit_transform(self.as_array())
+        else:
+            raise NotImplemented(f"method {method} is not supported")
 
-    def pca(self, n_components: int = 2) -> "SpineMetricDataset":
-        pca_metrics = {spine_name: [] for spine_name in self.spine_names}
-        reduced_data = self.as_reduced_array(n_components)
+    def reduce(self, n_components: int = 2, method: str = "pca") -> "SpineMetricDataset":
+        reduced_metrics = {spine_name: [] for spine_name in self.spine_names}
+        reduced_data = self.as_reduced_array(n_components, method)
         ordered_names = self.ordered_spine_names
         for i, spine_name in enumerate(ordered_names):
             for j in range(n_components):
                 conv = ManualFloatSpineMetric(reduced_data[i, j], f"PC{j + 1}")
-                pca_metrics[spine_name].append(conv)
-        return SpineMetricDataset(pca_metrics)
+                reduced_metrics[spine_name].append(conv)
+        return SpineMetricDataset(reduced_metrics)
 
     def save_as_array(self, filename) -> None:
         with open(filename, mode="w") as file:
