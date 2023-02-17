@@ -60,7 +60,7 @@ class SpineGrouping:
     outliers_label: str
 
     def __init__(self, samples: Iterable[str] = None, groups: Dict[str, Set[str]] = None,
-                 outliers_label: str = None):
+                 outliers_label: str = None, show_method: str = "tsne"):
         if groups is None:
             groups = {}
         if samples is None:
@@ -70,6 +70,11 @@ class SpineGrouping:
         self.samples = set(samples)
         self.groups = groups
         self.outliers_label = outliers_label
+        self._show_method = show_method
+
+    def set_show_method(self, method: str):
+        if method == "pca" or method == "tsne":
+            self._show_method = method
 
     @property
     def num_of_groups(self) -> int:
@@ -294,7 +299,7 @@ class SpineGrouping:
         colors = self.colors
 
         if metrics.as_array().shape[1] > 2:
-            metrics = metrics.reduce(2, "pca")
+            metrics = metrics.reduce(2, self._show_method)
 
         reduced_data = metrics.as_array()
         name_to_index = {name: i for i, name in enumerate(metrics.ordered_spine_names)}
@@ -429,6 +434,9 @@ class SpineFitter(ABC):
         self.dim = dim
         self.reduction = reduction
         self.grouping = SpineGrouping()
+
+    def set_show_method(self, method: str = "tsne"):
+        self.grouping.set_show_method(method)
 
     def fit(self, spine_metrics: SpineMetricDataset) -> None:
         self.fit_metrics = spine_metrics

@@ -923,6 +923,7 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                  static_params: Dict,
                                  score_function: Callable[[SpineClusterizer], float],
                                  dim_reduction: str = "pca",
+                                 show_method: str = "tsne",
                                  classification: SpineGrouping = None,
                                  save_folder: str = "output/clusterization") -> widgets.Widget:
     # calculate score graph
@@ -944,6 +945,7 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
         for value in param_values:
             scored_clusterizer = clusterizer_type(**{param_name: value}, **static_params, dim=dim,
                                                   reduction=dim_reduction)
+            scored_clusterizer.set_show_method(show_method)
             scored_clusterizer.fit(spine_metrics)
             dim_scores.append(score_function(scored_clusterizer))
 
@@ -973,6 +975,7 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
     def show_clusterization(param_value) -> None:
         clusterizer = clusterizer_type(**{param_name: param_value}, **static_params, dim=reduced_dim,
                                        reduction=dim_reduction)
+        clusterizer.set_show_method(show_method)
         clusterizer.fit(spine_metrics)
 
         score_graph = widgets.Output()
@@ -1060,6 +1063,7 @@ def k_means_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                          max_num_of_clusters: int = 20,
                                          metric="euclidean",
                                          dim_reduction: str = "pca",
+                                         show_method: str = "tsne",
                                          classification: SpineGrouping = None,
                                          save_folder: str = "output/clustering") -> widgets.Widget:
     min_num_of_clusters = max(min_num_of_clusters, 2)
@@ -1071,7 +1075,7 @@ def k_means_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                         widgets.IntSlider, "num_of_clusters",
                                         min_num_of_clusters, max_num_of_clusters,
                                         1, {"metric": metric}, score_function,
-                                        dim_reduction, classification, f"{save_folder}/kmeans")
+                                        dim_reduction, show_method, classification, f"{save_folder}/kmeans")
 
 
 def dbscan_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
@@ -1083,6 +1087,7 @@ def dbscan_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                         max_eps: float = 20,
                                         eps_step: float = 0.1,
                                         dim_reduction: str = "pca",
+                                        show_method: str = "tsne",
                                         classification: SpineGrouping = None,
                                         save_folder: str = "output/clustering") -> widgets.Widget:
     create_dir(save_folder)
@@ -1092,7 +1097,7 @@ def dbscan_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                         widgets.FloatSlider, "eps",
                                         min_eps, max_eps, eps_step,
                                         {"metric": metric}, score_function,
-                                        dim_reduction, classification, f"{save_folder}/dbscan")
+                                        dim_reduction, show_method, classification, f"{save_folder}/dbscan")
 
 
 def grouping_metric_distribution_widget(grouping: SpineGrouping,
