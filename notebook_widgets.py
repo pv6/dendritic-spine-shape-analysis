@@ -1332,6 +1332,26 @@ def consensus_widget(groupings: List[SpineGrouping]) -> widgets.Widget:
     return widgets.GridBox(grid_items, layout=widgets.Layout(grid_template_columns=f"repeat({len(groupings) + 1}, 30px)"))
 
 
+def dendrite_segmentation_view_widget(spine_dataset: SpineMeshDataset) -> widgets.Widget:
+    def show_dendrite_by_name(dendrite_name: str):
+        dendrite_v_f = spine_dataset.dendrite_v_f[dendrite_name]
+        dendrite_colors = np.ndarray((len(dendrite_v_f[0]), 3))
+        dendrite_colors[:] = \
+            _segmentation_to_colors(dendrite_v_f[0],
+                                    spines_to_segmentation([spine_dataset.spine_meshes[spine] for spine in spine_dataset.dendrite_to_spines[dendrite_name]]))
+
+        mesh_viewer = make_viewer(600, 600)
+        mesh_viewer.add_mesh(*dendrite_v_f, dendrite_colors)
+
+        display(widgets.HBox([mesh_viewer._renderer]))
+
+    names = list(spine_dataset.dendrite_names)
+    names.sort()
+    dendrite_names_dropdown = widgets.Dropdown(options=names, description="Dendrite:")
+
+    return widgets.interactive(show_dendrite_by_name, dendrite_name=dendrite_names_dropdown)
+
+
 def spine_dataset_view_widget(spine_dataset: SpineMeshDataset,
                               metrics_dataset: SpineMetricDataset,
                               spine_color: Color = RED) -> widgets.Widget:
