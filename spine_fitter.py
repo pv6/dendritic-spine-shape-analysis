@@ -446,7 +446,7 @@ class SpineFitter(ABC):
             if self.reduction == "pca":
                 data = PCA(self.dim).fit_transform(data)
             elif self.reduction == "tsne":
-                data = TSNE(self.dim).fit_transform(data)
+                data = TSNE(self.dim, init="pca").fit_transform(data)
             else:
                 raise NotImplemented(f"method {self.reduction} is not supported")
 

@@ -226,7 +226,7 @@ class SpineMetricDataset:
         if method == "pca":
             return PCA(n_components).fit_transform(self.as_array())
         elif method == "tsne":
-            return TSNE(n_components).fit_transform(self.as_array())
+            return TSNE(n_components, init="pca").fit_transform(self.as_array())
         else:
             raise NotImplemented(f"method {method} is not supported")
 
