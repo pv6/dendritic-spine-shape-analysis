@@ -922,13 +922,14 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                  param_min_value, param_max_value, param_step,
                                  static_params: Dict,
                                  score_function: Callable[[SpineClusterizer], float],
-                                 use_pca: bool = True,
+                                 dim_reduction: str = "pca",
+                                 show_method: str = "tsne",
                                  classification: SpineGrouping = None,
                                  save_folder: str = "output/clusterization") -> widgets.Widget:
     # calculate score graph
-    pca_dim = 2 if use_pca else -1
+    reduced_dim = 2 if dim_reduction else -1
 
-    scores = {pca_dim: []}
+    scores = {reduced_dim: []}
 
     # scores = {-1: [], 2: []}
     # pca_dim = spine_metrics.row_as_array(spine_metrics.spine_names[0]).size // 2
@@ -942,11 +943,13 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
 
     for (dim, dim_scores) in scores.items():
         for value in param_values:
-            scored_clusterizer = clusterizer_type(**{param_name: value}, **static_params, pca_dim=dim)
+            scored_clusterizer = clusterizer_type(**{param_name: value}, **static_params, dim=dim,
+                                                  reduction=dim_reduction)
+            scored_clusterizer.set_show_method(show_method)
             scored_clusterizer.fit(spine_metrics)
             dim_scores.append(score_function(scored_clusterizer))
 
-    peak = np.nanargmax(scores[pca_dim])
+    peak = np.nanargmax(scores[reduced_dim])
 
     def export_score_graph(_: widgets.Button):
         create_dir(save_folder)
@@ -954,7 +957,7 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
         with open(filename, mode="w") as file:
             writer = csv.writer(file)
             writer.writerow([param_name] + param_values)
-            writer.writerow(["score"] + scores[pca_dim])
+            writer.writerow(["score"] + scores[reduced_dim])
         print(f"Saved score graph to '{filename}'.")
 
     export_score_button = widgets.Button(description="Export Score Graph")
@@ -970,7 +973,9 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                      continuous_update=False)
 
     def show_clusterization(param_value) -> None:
-        clusterizer = clusterizer_type(**{param_name: param_value}, **static_params, pca_dim=pca_dim)
+        clusterizer = clusterizer_type(**{param_name: param_value}, **static_params, dim=reduced_dim,
+                                       reduction=dim_reduction)
+        clusterizer.set_show_method(show_method)
         clusterizer.fit(spine_metrics)
 
         score_graph = widgets.Output()
@@ -979,9 +984,9 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
             plt.axhline(y=0, color='r', linestyle='-')
             for (dim, dim_scores) in scores.items():
                 if dim == -1:
-                    plot_label = "no pca"
+                    plot_label = f"no {dim_reduction}"
                 else:
-                    plot_label = f"{dim}d with pca "
+                    plot_label = f"{dim}d with {dim_reduction} "
                 plt.plot(param_values, dim_scores, label=plot_label)
 
             # plt.plot(param_values, reg.predict([[param] for param in param_values]))
@@ -997,7 +1002,9 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
         # export clusterization button
         def export_clusterization(_: widgets.Button):
             create_dir(save_folder)
-            save_path = f"{save_folder}/{param_name}={param_value}_pca={clusterizer.pca_dim}_{clusterizer.grouping.num_of_groups}_clusters"
+            save_path = f"{save_folder}/{param_name}={param_value}" \
+                        f"_{clusterizer.reduction}={clusterizer.dim}" \
+                        f"_{clusterizer.grouping.num_of_groups}_clusters"
             create_dir(save_path)
             save_path += "/"
 
@@ -1005,17 +1012,17 @@ def clustering_experiment_widget(spine_metrics: SpineMetricDataset,
             clusterizer.grouping.save(clusterization_save_path)
             print(f"Saved clusterization to \"{clusterization_save_path}\".")
 
-            pca_save_path = save_path + "pca.csv"
-            clusterizer.grouping.save_pca(spine_metrics, pca_save_path)
-            print(f"Saved pca coordinates to \"{pca_save_path}\".")
+            reduced_save_path = save_path + f"reduced_{dim_reduction}.csv"
+            clusterizer.grouping.save_reduced(spine_metrics, reduced_save_path, dim_reduction)
+            print(f"Saved reduced coordinates to \"{reduced_save_path}\".")
 
             classification_save_path = save_path + "classification.json"
             classification.save(classification_save_path)
             print(f"Saved classification to \"{classification_save_path}\".")
 
-            classification_save_pca_path = save_path + "classification_pca.csv"
-            classification.save_pca(spine_metrics, classification_save_pca_path)
-            print(f"Saved classification pca coordinates to \"{classification_save_pca_path}\".")
+            classification_save_reduced_path = save_path + f"classification_reduced_{dim_reduction}.csv"
+            classification.save_reduced(spine_metrics, classification_save_reduced_path, dim_reduction)
+            print(f"Saved classification reduced coordinates to \"{classification_save_reduced_path}\".")
 
             distribution_save_path = save_path + "metric_distributions.csv"
             clusterizer.grouping.save_metric_distribution(every_spine_metrics, distribution_save_path)
@@ -1055,7 +1062,8 @@ def k_means_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                          min_num_of_clusters: int = 2,
                                          max_num_of_clusters: int = 20,
                                          metric="euclidean",
-                                         use_pca: bool = True,
+                                         dim_reduction: str = "pca",
+                                         show_method: str = "tsne",
                                          classification: SpineGrouping = None,
                                          save_folder: str = "output/clustering") -> widgets.Widget:
     min_num_of_clusters = max(min_num_of_clusters, 2)
@@ -1067,7 +1075,7 @@ def k_means_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                         widgets.IntSlider, "num_of_clusters",
                                         min_num_of_clusters, max_num_of_clusters,
                                         1, {"metric": metric}, score_function,
-                                        use_pca, classification, f"{save_folder}/kmeans")
+                                        dim_reduction, show_method, classification, f"{save_folder}/kmeans")
 
 
 def dbscan_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
@@ -1078,7 +1086,8 @@ def dbscan_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                         min_eps: float = 2,
                                         max_eps: float = 20,
                                         eps_step: float = 0.1,
-                                        use_pca: bool = True,
+                                        dim_reduction: str = "pca",
+                                        show_method: str = "tsne",
                                         classification: SpineGrouping = None,
                                         save_folder: str = "output/clustering") -> widgets.Widget:
     create_dir(save_folder)
@@ -1088,7 +1097,7 @@ def dbscan_clustering_experiment_widget(spine_metrics: SpineMetricDataset,
                                         widgets.FloatSlider, "eps",
                                         min_eps, max_eps, eps_step,
                                         {"metric": metric}, score_function,
-                                        use_pca, classification, f"{save_folder}/dbscan")
+                                        dim_reduction, show_method, classification, f"{save_folder}/dbscan")
 
 
 def grouping_metric_distribution_widget(grouping: SpineGrouping,
@@ -1321,6 +1330,26 @@ def consensus_widget(groupings: List[SpineGrouping]) -> widgets.Widget:
             # row.append(button)
 
     return widgets.GridBox(grid_items, layout=widgets.Layout(grid_template_columns=f"repeat({len(groupings) + 1}, 30px)"))
+
+
+def dendrite_segmentation_view_widget(spine_dataset: SpineMeshDataset) -> widgets.Widget:
+    def show_dendrite_by_name(dendrite_name: str):
+        dendrite_v_f = spine_dataset.dendrite_v_f[dendrite_name]
+        dendrite_colors = np.ndarray((len(dendrite_v_f[0]), 3))
+        dendrite_colors[:] = \
+            _segmentation_to_colors(dendrite_v_f[0],
+                                    spines_to_segmentation([spine_dataset.spine_meshes[spine] for spine in spine_dataset.dendrite_to_spines[dendrite_name]]))
+
+        mesh_viewer = make_viewer(600, 600)
+        mesh_viewer.add_mesh(*dendrite_v_f, dendrite_colors)
+
+        display(widgets.HBox([mesh_viewer._renderer]))
+
+    names = list(spine_dataset.dendrite_names)
+    names.sort()
+    dendrite_names_dropdown = widgets.Dropdown(options=names, description="Dendrite:")
+
+    return widgets.interactive(show_dendrite_by_name, dendrite_name=dendrite_names_dropdown)
 
 
 def spine_dataset_view_widget(spine_dataset: SpineMeshDataset,
