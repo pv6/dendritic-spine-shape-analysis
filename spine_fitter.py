@@ -315,14 +315,16 @@ class SpineGrouping:
         plt.xlabel(metrics.metric_names[0])
         plt.ylabel(metrics.metric_names[1])
 
-    def get_balanced_subset(self, size_ratio: float = 0.5) -> "SpineGrouping":
+    def get_balanced_subset(self, size_ratio: Union[float, Dict] = 0.5) -> "SpineGrouping":
         new_groups = {}
+        if isinstance(size_ratio, float):
+            size_ratio = {label: size_ratio for label in self.groups.keys()}
         for (label, group) in self.groups.items():
             if len(group) > 0:
                 list_group = list(group)
                 list_group.sort()
                 random.shuffle(list_group)
-                new_groups[label] = set(list_group[:int(len(group) * size_ratio) + 1])
+                new_groups[label] = set(list_group[:int(len(group) * size_ratio[label]) + 1])
             else:
                 new_groups[label] = set()
 
@@ -330,7 +332,7 @@ class SpineGrouping:
         for group in new_groups.values():
             new_samples = new_samples.union(group)
         outliers = self.outlier_group
-        new_samples = new_samples.union(list(outliers)[:int(len(outliers) * size_ratio) + 1])
+        new_samples = new_samples.union(list(outliers)[:int(len(outliers) * np.mean(list(size_ratio.values()))) + 1])
 
         return SpineGrouping(new_samples, new_groups)
 
