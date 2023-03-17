@@ -1,5 +1,5 @@
 # dendritic-spine-shape-analysis
-Dendritic spine image segmentation tool for extracting and analysis of dendritic spine morphologies. 
+Dendritic spine analysis tool for dendritic spine image segmentation, dendritic spine morphologies extraction,analysis and clustering.
 
 ## System requirements
 - Windows 8 or newer
